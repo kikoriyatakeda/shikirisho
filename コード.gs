@@ -1,0 +1,315 @@
+/**
+ * ★【ステップ1】権限の承認ダイアログを強制表示する関数★
+ */
+function triggerAuthorization() {
+  DriveApp.getRootFolder();
+  DocumentApp.create("permission_trigger_dummy");
+}
+
+/**
+ * ★【ステップ2】権限が取れたか確認するテスト関数★
+ */
+function testDrivePermission() {
+  try {
+    const blob = Utilities.newBlob("test", "text/plain", "test_permission.txt");
+    const file = Drive.Files.insert({title: "test_permission.txt"}, blob);
+    Drive.Files.remove(file.id);
+    console.log("【テスト成功】Drive APIの完全な権限が取得できました！");
+  } catch (e) {
+    console.error("【テスト失敗】" + e.toString());
+  }
+}
+
+/**
+ * 初期化データ（現場リストと所有者マスタ）をまとめて取得する
+ */
+function getInitialData() {
+  return {
+    genbaList: getGenbaList(),
+    ownerMaster: getOwnerMasterList()
+  };
+}
+
+/**
+ * 現場マスタから「施業地区 + 現場名」のリストを取得する
+ */
+function getGenbaList() {
+  try {
+    const spreadsheetId = '1-HV-cb7tPiOvTD4nzKnlhfmPnfr59Kq2qxNNsSlblWU';
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const sheet = ss.getSheetByName("現場マスタ");
+    if (!sheet) return [];
+    
+    const data = sheet.getDataRange().getValues();
+    const headers = data[0];
+    const chikuIdx = headers.indexOf("施業地区");
+    const nameIdx = headers.indexOf("現場名");
+    
+    if (chikuIdx === -1 || nameIdx === -1) return [];
+    
+    const list = [];
+    for (let i = 1; i < data.length; i++) {
+      if (data[i][nameIdx]) {
+        const chiku = data[i][chikuIdx] ? data[i][chikuIdx] + " " : "";
+        list.push(chiku + data[i][nameIdx]);
+      }
+    }
+    return list;
+  } catch (e) {
+    console.error("マスタ取得エラー", e);
+    return [];
+  }
+}
+
+/**
+ * 所有者マスタから「現場名 - 所有者名」のペアを取得する
+ */
+function getOwnerMasterList() {
+  try {
+    const spreadsheetId = '1hlzou-dX-hBmUwryu1YJgme4_IOiP4V8CswMQc3YXac';
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    let sheet = ss.getSheetByName("所有者マスタ");
+    if (!sheet) return [];
+    
+    const data = sheet.getDataRange().getValues();
+    if (data.length <= 1) return [];
+    
+    return data.slice(1).map(row => ({
+      genba: row[0],
+      owner: row[1]
+    }));
+  } catch (e) {
+    return [];
+  }
+}
+
+/**
+ * Google Drive の OCR機能 を使用して画像を解析する
+ */
+function analyzeDocumentImage(base64Image, dummyPrompt) {
+  try {
+    const blob = Utilities.newBlob(Utilities.base64Decode(base64Image), MimeType.JPEG, "temp_ocr.jpg");
+    
+    let fileId;
+    try {
+      const resource = { title: "temp_ocr_doc" };
+      const file = Drive.Files.insert(resource, blob, {ocr: true, ocrLanguage: 'ja'});
+      fileId = file.id;
+    } catch (apiError) {
+      const errorStr = apiError.toString();
+      if (errorStr.includes("User rate limit exceeded for OCR")) {
+        return JSON.stringify({ 
+          error: "【OCR利用制限エラー】\n短時間に連続して解析を行ったため、一時的な利用制限がかかっています。\n恐れ入りますが、数分〜数十分ほど時間を置いてから再度お試しください。"
+        });
+      }
+      return JSON.stringify({ 
+        error: "【Drive API エラー】\n" + errorStr + "\n\n(GASエディタで triggerAuthorization を実行して権限を許可してください)"
+      });
+    }
+
+    const doc = DocumentApp.openById(fileId);
+    const text = doc.getBody().getText();
+    
+    Drive.Files.remove(fileId);
+
+    return parseOcrText(text);
+
+  } catch (e) {
+    return JSON.stringify({ error: "OCR解析エラー: " + e.toString() });
+  }
+}
+
+/**
+ * OCRテキストの解析ロジック（期間抽出対応版）
+ */
+function parseOcrText(text) {
+  const lines = text.split('\n');
+  let summaryData = [];
+  let dateStr = "";
+  let periodStr = "";
+  let extractedYear = 0;
+
+  // 1. 日付の抽出（和暦から西暦への変換）
+  const dateMatch = text.match(/(令和|平成)?\s*([元0-9０-９]+)\s*年\s*([0-9０-９]+)\s*月\s*([0-9０-９]+)\s*日/);
+  if (dateMatch) {
+    let nengo = dateMatch[1];
+    let yearText = dateMatch[2].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    let year = yearText === "元" ? 1 : parseInt(yearText) || 1;
+    let month = parseInt(dateMatch[3].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+    let day = parseInt(dateMatch[4].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)));
+    
+    if (nengo === "令和" || !nengo) year += 2018; 
+    else if (nengo === "平成") year += 1988;
+    
+    extractedYear = year;
+    dateStr = `${year}/${month.toString().padStart(2, '0')}/${day.toString().padStart(2, '0')}`;
+  }
+
+  // 2. 期間の抽出（案B: 年を補完する）
+  // パターン: 4/9 ～ 4/22, 04 / 09 - 04 / 22 など
+  const periodMatch = text.match(/([0-9０-９]{1,2})\s*[\/／]\s*([0-9０-９]{1,2})\s*[～~－-]\s*([0-9０-９]{1,2})\s*[\/／]\s*([0-9０-９]{1,2})/);
+  if (periodMatch && extractedYear > 0) {
+    const m1 = periodMatch[1].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const d1 = periodMatch[2].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const m2 = periodMatch[3].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    const d2 = periodMatch[4].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    periodStr = `${extractedYear}/${m1}/${d1} ～ ${extractedYear}/${m2}/${d2}`;
+  } else if (periodMatch) {
+    // 年が不明な場合はそのまま抽出
+    periodStr = periodMatch[0].replace(/\s+/g, '');
+  }
+
+  // 3. 所有者候補の抽出（補助的に3文字以上の文字列を出す）
+  let ownerCandidates = [];
+  const noiseKeywords = ["仕切書", "計算書", "明細書", "精算書", "売上", "消費税", "手数料", "合計", "材積", "単価", "金額", "樹種", "現場", "電話", "TEL", "口座"];
+  for (let i = 0; i < lines.length; i++) {
+    let cleanLine = lines[i].replace(/\s+/g, ' ').trim();
+    if (cleanLine.length < 3) continue;
+    if (cleanLine.match(/[0-9０-９]{3,}/) || cleanLine.match(/[0-9０-９]+\.[0-9０-９]+/)) continue;
+    if (noiseKeywords.some(kw => cleanLine.includes(kw))) continue;
+    let name = cleanLine.replace(/[:：]/g, '').trim();
+    if (name.length >= 3 && !ownerCandidates.includes(name)) ownerCandidates.push(name);
+  }
+
+  // 4. 樹種と数値のパズル
+  const speciesWords = ["スギ", "ヒノキ", "マツ", "杉", "桧", "その他"];
+  let foundSpecies = [];
+  let firstSpeciesIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    for (let sp of speciesWords) {
+      if (lines[i].includes(sp)) {
+        let norm = (sp === "杉") ? "スギ" : (sp === "桧") ? "ヒノキ" : sp;
+        if (!foundSpecies.includes(norm)) {
+          foundSpecies.push(norm);
+          if (firstSpeciesIndex === -1) firstSpeciesIndex = i; 
+        }
+      }
+    }
+  }
+
+  let globalVolumeCandidates = new Set([0]);
+  let globalPriceCandidates = new Set([0]);
+  for (let line of lines) {
+    let nums = line.replace(/,/g, '').match(/\d+(\.\d+)?/g);
+    if (nums) {
+      nums.forEach(numStr => {
+        let num = parseFloat(numStr);
+        if (numStr.includes('.')) globalVolumeCandidates.add(num);
+        else if (num >= 10) globalPriceCandidates.add(num);
+      });
+    }
+  }
+
+  if (foundSpecies.length > 0) {
+    let allNumbers = [];
+    for (let i = firstSpeciesIndex; i < lines.length; i++) {
+      if (lines[i].match(/(売上|合計|精算|消費税)/)) break;
+      let nums = lines[i].replace(/,/g, '').match(/\d+(\.\d+)?|[-ー－—_]{2,}/g);
+      if (nums) {
+        nums.forEach(n => {
+          if (n.match(/[-ー－—_]/)) allNumbers.push(0);
+          else allNumbers.push(parseFloat(n));
+        });
+      }
+    }
+    let half = Math.ceil(allNumbers.length / 2);
+    let volumes = allNumbers.slice(0, half);
+    let prices = allNumbers.slice(half);
+    foundSpecies.forEach((sp, idx) => {
+      summaryData.push({
+        species: sp,
+        volume: volumes[idx] || 0,
+        avgPrice: Math.round(prices[idx] || 0)
+      });
+    });
+  }
+
+  return JSON.stringify({
+    date: dateStr,
+    period: periodStr, // 新規追加
+    ownerCandidates: ownerCandidates, 
+    summaryData: summaryData,
+    volumeCandidates: Array.from(globalVolumeCandidates).sort((a,b)=>a-b),
+    priceCandidates: Array.from(globalPriceCandidates).sort((a,b)=>a-b),
+    rawOcrText: text
+  });
+}
+
+/**
+ * 抽出データをスプレッドシートに保存 & マスタ自動更新
+ */
+function saveToSpreadsheet(jsonString) {
+  try {
+    if (!jsonString) throw new Error("データが空です。");
+    const data = JSON.parse(jsonString);
+    
+    const spreadsheetId = '1hlzou-dX-hBmUwryu1YJgme4_IOiP4V8CswMQc3YXac';
+    const ss = SpreadsheetApp.openById(spreadsheetId);
+    
+    // 1. 仕切り書への保存（12列構成）
+    let sheet = ss.getSheetByName("仕切り書");
+    if (!sheet) {
+      sheet = ss.insertSheet("仕切り書");
+      // 期間列を挿入した新ヘッダー
+      sheet.appendRow(["保存日時", "現場名", "事業区分", "所有者", "期間", "日付", "樹種", "材積", "単価", "小計", "合計材積", "合計金額"]);
+      sheet.getRange(1, 1, 1, 12).setBackground("#059669").setFontColor("white").setFontWeight("bold");
+    } else {
+      // 重複チェック（列位置がずれたので修正：現場[1], 所有者[3], 日付[5]）
+      const existingData = sheet.getDataRange().getDisplayValues();
+      for (let i = 1; i < existingData.length; i++) {
+        if (existingData[i][1] === data.genbaName && 
+            existingData[i][3] === data.ownerName && 
+            existingData[i][5] === data.date) {
+           throw new Error("DuplicateData: 同じデータが既に登録されています。");
+        }
+      }
+    }
+    
+    const now = new Date();
+    const rows = (data.summaryData || []).map(item => [
+      now, 
+      data.genbaName || "-", 
+      data.businessType || "-", 
+      data.ownerName || "-", 
+      data.period || "-", // 期間
+      data.date || "-",   // 日付
+      item.species || "", 
+      item.volume || 0, 
+      item.avgPrice || 0, 
+      item.subtotal || 0, 
+      data.totalVolume || 0, 
+      data.totalAmount || 0  
+    ]);
+    if (rows.length > 0) sheet.getRange(sheet.getLastRow() + 1, 1, rows.length, rows[0].length).setValues(rows);
+
+    // 2. 所有者マスタの自動更新
+    if (data.genbaName && data.ownerName) {
+      updateOwnerMaster(ss, data.genbaName, data.ownerName);
+    }
+
+    return "Success";
+  } catch (e) {
+    return "Error: " + e.toString();
+  }
+}
+
+/**
+ * 所有者マスタに現場名と所有者のペアを登録
+ */
+function updateOwnerMaster(ss, genba, owner) {
+  let masterSheet = ss.getSheetByName("所有者マスタ");
+  if (!masterSheet) {
+    masterSheet = ss.insertSheet("所有者マスタ");
+    masterSheet.appendRow(["現場名", "所有者名"]);
+    masterSheet.getRange(1, 1, 1, 2).setBackground("#059669").setFontColor("white").setFontWeight("bold");
+  }
+  const data = masterSheet.getDataRange().getValues();
+  const exists = data.some(row => row[0] === genba && row[1] === owner);
+  if (!exists) masterSheet.appendRow([genba, owner]);
+}
+
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('index')
+    .setTitle('林建DX PDF解析')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
