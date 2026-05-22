@@ -25,7 +25,7 @@
         <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-slate-800 border-l-4 border-[#059669] pl-4">林業検収・積算アシスタント</h1>
-                <p class="text-sm text-slate-500 mt-1">集計表から樹種・材積・単価を自動判別します</p>
+                <p class="text-sm text-slate-500 mt-1">集計表から樹種・材積・単価を自動判別します <span class="text-xs text-orange-500 font-bold ml-2"></span></p>
             </div>
             <div class="flex items-center gap-2">
                 <span class="bg-white px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200 text-[#059669]">Ver 3.8 (所有者初期値空)</span>
@@ -124,6 +124,70 @@
     </style>
 
     <script>
+        // -------------------------------------------------------------
+        // ▼▼ Canvasプレビュー用のモック（ダミー環境）設定 ▼▼
+        // -------------------------------------------------------------
+        if (typeof google === 'undefined') {
+            window.google = {
+                script: {
+                    run: {
+                        withSuccessHandler: function(fn) {
+                            this._successFn = fn;
+                            return this;
+                        },
+                        withFailureHandler: function(fn) {
+                            this._failureFn = fn;
+                            return this;
+                        },
+                        getInitialData: function() {
+                            setTimeout(() => {
+                                if(this._successFn) {
+                                    this._successFn({
+                                        genbaList: ["高知地区 現場A", "高知地区 現場B", "四国地区 現場C"],
+                                        ownerMaster: [
+                                            {genba: "高知地区 現場A", owner: "山田 太郎"},
+                                            {genba: "高知地区 現場A", owner: "株式会社フォレスト"}
+                                        ]
+                                    });
+                                }
+                            }, 500);
+                        },
+                        analyzeDocumentImage: function(base64Image, type) {
+                            setTimeout(() => {
+                                if(this._successFn) {
+                                    // 本番に近いデータ形式（period）でモックを返す
+                                    const dummyResponse = {
+                                        "date": "2026/05/22",
+                                        "period": "2026/05/01 ～ 2026/05/15",
+                                        "genbaName": "", 
+                                        "ownerCandidates": ["プレビュー 太郎", "テスト林業"],
+                                        "summaryData": [
+                                            { "species": "スギ", "volume": 35.123, "avgPrice": 12500 },
+                                            { "species": "ヒノキ", "volume": 18.450, "avgPrice": 16800 },
+                                            { "species": "その他", "volume": 0, "avgPrice": 0 }
+                                        ],
+                                        "volumeCandidates": [0, 18.450, 35.123, 53.573],
+                                        "priceCandidates": [0, 5000, 12500, 16800, 439037, 309960]
+                                    };
+                                    this._successFn(JSON.stringify(dummyResponse));
+                                }
+                            }, 1500); // OCR処理っぽく少し待たせる
+                        },
+                        saveToSpreadsheet: function(dataStr) {
+                            setTimeout(() => {
+                                if(this._successFn) {
+                                    this._successFn("Success");
+                                }
+                            }, 1200);
+                        }
+                    }
+                }
+            };
+        }
+        // -------------------------------------------------------------
+        // ▲▲ モック設定ここまで ▲▲
+        // -------------------------------------------------------------
+
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
         let currentBase64Image = null;
@@ -331,6 +395,17 @@
             currentOcrOwnerCandidates = [...new Set(processedOwnerCandidates)];
             let defaultOwner = ""; // ▼ 初期値を空に変更
 
+            // --- 期間（開始日・終了日）のパース処理を追加 ---
+            let parsedStartDate = data.startDate || "";
+            let parsedEndDate = data.endDate || "";
+            
+            // 本番環境のGASは period ("YYYY/MM/DD ～ YYYY/MM/DD") を返すので、それを input type="date" (YYYY-MM-DD) 用に分割して変換
+            if (!parsedStartDate && !parsedEndDate && data.period && data.period !== "-") {
+                const parts = data.period.split(/～|~|－|-/);
+                if (parts.length >= 1) parsedStartDate = parts[0].trim().replace(/\//g, '-');
+                if (parts.length >= 2) parsedEndDate = parts[1].trim().replace(/\//g, '-');
+            }
+
             let html = `
                 <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 shadow-sm">
                     <div class="mb-4">
@@ -385,9 +460,10 @@
                                 <div class="flex items-center gap-2">
                                     <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                                     <div class="flex items-center gap-1">
-                                        <input type="date" id="start-date-input" value="${data.startDate || ''}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
+                                        <!-- パースした開始日・終了日をセット -->
+                                        <input type="date" id="start-date-input" value="${parsedStartDate}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
                                         <span class="text-slate-400 text-xs font-bold px-1">〜</span>
-                                        <input type="date" id="end-date-input" value="${data.endDate || ''}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
+                                        <input type="date" id="end-date-input" value="${parsedEndDate}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
                                     </div>
                                 </div>
                             </div>
@@ -490,10 +566,24 @@
                 return;
             }
 
+            // --- 入力された開始日と終了日を取得し、GAS保存用のperiod文字列を生成 ---
+            const startVal = document.getElementById('start-date-input') ? document.getElementById('start-date-input').value : "";
+            const endVal = document.getElementById('end-date-input') ? document.getElementById('end-date-input').value : "";
+            
+            let periodStr = "-";
+            if (startVal && endVal) {
+                periodStr = `${startVal.replace(/-/g, '/')} ～ ${endVal.replace(/-/g, '/')}`;
+            } else if (startVal) {
+                periodStr = startVal.replace(/-/g, '/');
+            } else if (endVal) {
+                periodStr = endVal.replace(/-/g, '/');
+            }
+
             const dataToSave = {
-                date: document.getElementById('base-date-input') ? document.getElementById('base-date-input').value : "", // 抽出基準日
-                startDate: document.getElementById('start-date-input') ? document.getElementById('start-date-input').value : "", // 期間開始
-                endDate: document.getElementById('end-date-input') ? document.getElementById('end-date-input').value : "",     // 期間終了
+                date: document.getElementById('base-date-input') ? document.getElementById('base-date-input').value : "", 
+                startDate: startVal,
+                endDate: endVal,
+                period: periodStr, // ★バックエンド(コード.gs)はこれを期待しているため追加して送信
                 genbaName: genbaValue,
                 businessType: document.querySelector('input[name="business-type"]:checked') ? document.querySelector('input[name="business-type"]:checked').value : "",
                 ownerName: document.getElementById('owner-input') ? document.getElementById('owner-input').value.trim() : "",
