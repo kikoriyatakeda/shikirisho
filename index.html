@@ -18,6 +18,12 @@
         /* input[type="number"]のスピンボタンを隠す */
         input[type=number]::-webkit-inner-spin-button, 
         input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        
+        /* スクロールバーの細線化（サムネイル用） */
+        .scrollbar-thin::-webkit-scrollbar { height: 6px; }
+        .scrollbar-thin::-webkit-scrollbar-track { background: #f1f5f9; border-radius: 10px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+        .scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
     </style>
 </head>
 <body class="p-4 lg:p-8 relative">
@@ -25,35 +31,53 @@
         <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-slate-800 border-l-4 border-[#059669] pl-4">林業検収・積算アシスタント</h1>
-                <p class="text-sm text-slate-500 mt-1">集計表から樹種・材積・単価を自動判別します <span class="text-xs text-orange-500 font-bold ml-2"></span></p>
+                <p class="text-sm text-slate-500 mt-1">集計表から樹種・材積・単価を自動判別します <span class="text-xs text-orange-500 font-bold ml-2">※現在プレビューモード（ダミーデータ通信）</span></p>
             </div>
             <div class="flex items-center gap-2">
-                <span class="bg-white px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200 text-[#059669]">Ver 3.8 (所有者初期値空)</span>
+                <span class="bg-white px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200 text-[#059669]">Ver 4.0 (複数ファイル対応)</span>
             </div>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- 左カラム -->
             <div class="lg:col-span-5 space-y-6">
+                <!-- アップロード領域 -->
                 <div class="bento-card">
                     <h2 class="font-bold mb-4 flex items-center gap-2 text-slate-700 text-sm">
                         <svg class="w-4 h-4 text-[#059669]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z"></path></svg>
                         書類アップロード
                     </h2>
+                    <!-- ▼ multiple属性を追加して複数ファイル選択可能に -->
                     <div class="flex flex-col items-center justify-center border-2 border-dashed border-slate-200 rounded-xl p-8 bg-slate-50 hover:bg-slate-100 transition-colors cursor-pointer" onclick="document.getElementById('pdf-input').click()">
-                        <input type="file" id="pdf-input" accept="application/pdf" class="hidden">
+                        <input type="file" id="pdf-input" accept="application/pdf" multiple class="hidden">
                         <div class="bg-white p-3 rounded-full shadow-sm mb-4 text-[#059669]">
                             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
                         </div>
-                        <p class="font-bold text-slate-700">PDFを選択</p>
-                        <p class="text-[10px] text-slate-400 mt-1 italic">※1ページ目の左上（集計表）のみを抽出します</p>
+                        <p class="font-bold text-slate-700">PDFを選択 (複数可)</p>
+                        <p class="text-[10px] text-slate-400 mt-1 italic">※一度に最大10ファイルまで保持できます</p>
                     </div>
                 </div>
 
+                <!-- ▼ サムネイル一覧領域（新規追加） -->
+                <div class="bento-card hidden" id="thumbnail-container">
+                    <div class="flex justify-between items-center mb-3">
+                        <h2 class="font-bold text-slate-700 text-xs text-[#059669] flex items-center gap-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"></path></svg>
+                            ファイル一覧 <span id="file-count-badge" class="ml-1 text-slate-500 font-normal text-[10px]"></span>
+                        </h2>
+                        <button onclick="clearFiles()" class="text-[10px] text-red-500 hover:text-red-700 underline font-bold px-2 py-1 bg-red-50 rounded">すべてクリア</button>
+                    </div>
+                    <!-- サムネイルが横並びになるコンテナ -->
+                    <div id="thumbnail-list" class="flex gap-3 overflow-x-auto pb-2 pt-1 scrollbar-thin">
+                        <!-- JSで動的に追加されます -->
+                    </div>
+                </div>
+
+                <!-- プレビュー領域 -->
                 <div class="bento-card hidden" id="preview-container">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="font-bold text-slate-700 text-xs text-[#059669]">抽出領域プレビュー</h2>
-                        <span id="page-count-badge" class="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded">--</span>
+                        <span id="page-count-badge" class="bg-slate-100 text-slate-600 text-[9px] px-2 py-1 rounded truncate max-w-[200px]">--</span>
                     </div>
                     <!-- クリックでモーダルを開く -->
                     <div class="flex justify-center bg-slate-100 p-2 rounded-lg overflow-y-auto max-h-[350px] cursor-pointer hover:opacity-90 transition-opacity relative group" onclick="openModal()">
@@ -70,10 +94,12 @@
 
             <!-- 右カラム -->
             <div class="lg:col-span-7 space-y-6">
+                <!-- 実行ボタン -->
                 <div class="bento-card p-4">
-                    <button id="analyze-btn" disabled class="w-full bg-slate-200 text-slate-500 py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all">
-                        <span class="text-lg">データ抽出を実行</span>
-                        <span id="img-size-info" class="text-[9px] font-normal opacity-80 italic">PDFを選択してください</span>
+                    <button id="analyze-btn" disabled class="w-full bg-slate-200 text-slate-500 py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all relative overflow-hidden">
+                        <span class="text-lg relative z-10" id="analyze-btn-text">データ抽出を実行</span>
+                        <span id="img-size-info" class="text-[9px] font-normal opacity-80 italic relative z-10">PDFを選択してください</span>
+                        <div id="btn-progress" class="absolute left-0 top-0 bottom-0 bg-[#059669]/20 w-0 transition-all duration-300"></div>
                     </button>
                     <!-- テスト用ダミーデータ呼び出しリンク -->
                     <button onclick="showDummyData()" class="mt-4 w-full text-[11px] text-slate-400 hover:text-slate-600 underline text-center transition-colors">
@@ -81,18 +107,16 @@
                     </button>
                 </div>
 
+                <!-- 結果表示エリア -->
                 <div class="bento-card min-h-[450px] relative overflow-hidden" id="result-card">
                     <div id="loading" class="hidden absolute inset-0 bg-white/95 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-xl text-center p-6">
                         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[#059669] mb-4"></div>
-                        <p class="text-sm text-slate-600 font-bold italic">文字を抽出・分析中...</p>
+                        <p class="text-sm text-slate-600 font-bold italic" id="loading-msg">文字を抽出・分析中...</p>
                         <p class="text-[10px] text-slate-400 mt-2 max-w-[200px]">少々お待ちください</p>
                     </div>
                     
                     <div id="result-content">
-                        <div class="flex flex-col items-center justify-center py-32 text-slate-300">
-                            <svg class="w-16 h-16 mb-4 opacity-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 00 2 2h10a2 2 0 00 2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01m-.01 4h.01"></path></svg>
-                            <p class="text-sm italic text-center">解析結果がここに表示されます</p>
-                        </div>
+                        <!-- 初期状態の表示 -->
                     </div>
                 </div>
             </div>
@@ -155,7 +179,6 @@
                         analyzeDocumentImage: function(base64Image, type) {
                             setTimeout(() => {
                                 if(this._successFn) {
-                                    // 本番に近いデータ形式（period）でモックを返す
                                     const dummyResponse = {
                                         "date": "2026/05/22",
                                         "period": "2026/05/01 ～ 2026/05/15",
@@ -171,14 +194,14 @@
                                     };
                                     this._successFn(JSON.stringify(dummyResponse));
                                 }
-                            }, 1500); // OCR処理っぽく少し待たせる
+                            }, 1000); 
                         },
                         saveToSpreadsheet: function(dataStr) {
                             setTimeout(() => {
                                 if(this._successFn) {
                                     this._successFn("Success");
                                 }
-                            }, 1200);
+                            }, 1000);
                         }
                     }
                 }
@@ -190,12 +213,17 @@
 
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
 
-        let currentBase64Image = null;
+        // --- 状態管理用変数 ---
         let genbaMasterList = []; 
-        let ownerMasterList = []; // 所有者マスタを保持する配列
-        let currentOcrOwnerCandidates = []; // OCRで抽出した所有者候補を保持する配列
+        let ownerMasterList = [];
+        let currentOcrOwnerCandidates = [];
+        
+        const MAX_FILES = 10;
+        let pdfFiles = []; // 複数ファイルの情報を保持する配列
+        let currentSelectedIndex = -1; // 現在選択・プレビュー中のファイルのインデックス
 
         window.onload = function() {
+            resetResultArea(); // 初期表示セット
             google.script.run
                 .withSuccessHandler(data => { 
                     genbaMasterList = data.genbaList || []; 
@@ -205,36 +233,51 @@
                 .getInitialData(); 
         };
 
-        // モーダル操作
-        function openModal() {
-            if (!currentBase64Image) return;
-            document.getElementById('modal-image').src = document.getElementById('pdf-canvas').toDataURL();
-            document.getElementById('image-modal').classList.remove('hidden');
-        }
-        function closeModal() { document.getElementById('image-modal').classList.add('hidden'); }
-        document.addEventListener('keydown', e => { if(e.key === 'Escape') closeModal(); });
+        // FileReaderをPromise化するユーティリティ
+        const readAsArrayBuffer = (file) => new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsArrayBuffer(file);
+        });
 
+        // ==========================================
+        // 複数PDFの読み込みとサムネイル化
+        // ==========================================
         document.getElementById('pdf-input').onchange = async function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+            const files = Array.from(e.target.files);
+            if (!files.length) return;
 
+            // 最大10件制限のチェック
+            if (pdfFiles.length + files.length > MAX_FILES) {
+                alert(`※一度に保持できるのは最大${MAX_FILES}ファイルまでです。\n超過分は無視されます。`);
+            }
+            
+            // 処理可能なファイルだけに絞る
+            const filesToProcess = files.slice(0, MAX_FILES - pdfFiles.length);
+            if (filesToProcess.length === 0) return;
+
+            // 読み込み中のUI表示
             const btn = document.getElementById('analyze-btn');
             btn.disabled = true;
-            btn.innerHTML = `<span>PDF処理中...</span>`;
+            document.getElementById('analyze-btn-text').innerText = `PDF読込中 (0/${filesToProcess.length})`;
+            document.getElementById('btn-progress').style.width = '0%';
+            document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('loading-msg').innerText = "PDFを展開・画像化中...";
 
-            const reader = new FileReader();
-            reader.onload = async function() {
+            let processedCount = 0;
+
+            // 各ファイルを順番に処理して画像（base64）化
+            for (const file of filesToProcess) {
                 try {
-                    const typedarray = new Uint8Array(this.result);
+                    const arrayBuffer = await readAsArrayBuffer(file);
+                    const typedarray = new Uint8Array(arrayBuffer);
                     const pdf = await pdfjsLib.getDocument(typedarray).promise;
-                    
-                    document.getElementById('page-count-badge').innerText = `1ページ目 (左上 超限定抽出)`;
-                    const canvas = document.getElementById('pdf-canvas');
-                    const context = canvas.getContext('2d');
                     
                     const page = await pdf.getPage(1);
                     const viewport = page.getViewport({ scale: 1.5 });
                     
+                    // PDFをCanvasにレンダリング
                     const tempCanvas = document.createElement('canvas');
                     tempCanvas.width = viewport.width;
                     tempCanvas.height = viewport.height;
@@ -244,40 +287,195 @@
                     
                     await page.render({ canvasContext: tempContext, viewport: viewport }).promise;
                     
+                    // 左上の集計表部分だけをクロップ
                     const cropWidth = viewport.width * 0.64;
                     const cropHeight = viewport.height * 0.37;
                     
-                    canvas.width = cropWidth;
-                    canvas.height = cropHeight;
-                    context.drawImage(tempCanvas, 0, 0, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+                    const finalCanvas = document.createElement('canvas');
+                    finalCanvas.width = cropWidth;
+                    finalCanvas.height = cropHeight;
+                    const finalContext = finalCanvas.getContext('2d');
+                    finalContext.drawImage(tempCanvas, 0, 0, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
                     
-                    currentBase64Image = canvas.toDataURL('image/jpeg', 0.6).replace(/^data:image\/jpeg;base64,/, "");
+                    const base64 = finalCanvas.toDataURL('image/jpeg', 0.6).replace(/^data:image\/jpeg;base64,/, "");
                     
-                    document.getElementById('preview-container').classList.remove('hidden');
-                    btn.disabled = false;
-                    btn.innerHTML = `<span class="text-lg">データ抽出を実行</span><span id="img-size-info" class="text-[10px] font-normal opacity-80 italic">準備完了</span>`;
-                    btn.className = "w-full accent-btn text-white py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all shadow-lg";
-                } catch (err) {
-                    showError("PDFの処理に失敗: " + err.message);
+                    // ファイル配列に追加
+                    pdfFiles.push({
+                        name: file.name,
+                        base64: base64,
+                        status: 'pending' // 'pending', 'saved'
+                    });
+
+                } catch(err) {
+                    console.error(`ファイル ${file.name} の読み込みエラー:`, err);
                 }
-            };
-            reader.readAsArrayBuffer(file);
+                
+                // プログレス表示の更新
+                processedCount++;
+                const percent = Math.round((processedCount / filesToProcess.length) * 100);
+                document.getElementById('analyze-btn-text').innerText = `PDF読込中 (${processedCount}/${filesToProcess.length})`;
+                document.getElementById('btn-progress').style.width = `${percent}%`;
+            }
+            
+            // 読込完了後のUIリセット
+            document.getElementById('loading').classList.add('hidden');
+            document.getElementById('btn-progress').style.width = '0%';
+            document.getElementById('pdf-input').value = ''; // 同じファイルも再選択できるようにリセット
+            
+            // ファイルが1つでもあれば、サムネイルを描画して最初のものを選択状態にする
+            if (pdfFiles.length > 0) {
+                renderThumbnails();
+                if (currentSelectedIndex === -1) {
+                    selectFile(0);
+                }
+            }
         };
 
+        // ==========================================
+        // サムネイルの描画
+        // ==========================================
+        function renderThumbnails() {
+            const container = document.getElementById('thumbnail-container');
+            const list = document.getElementById('thumbnail-list');
+            const badge = document.getElementById('file-count-badge');
+            
+            if (pdfFiles.length === 0) {
+                container.classList.add('hidden');
+                return;
+            }
+            
+            container.classList.remove('hidden');
+            badge.innerText = `(${pdfFiles.length}/${MAX_FILES})`;
+            
+            list.innerHTML = pdfFiles.map((f, index) => {
+                const isSelected = index === currentSelectedIndex;
+                const isSaved = f.status === 'saved';
+                
+                // 選択中のファイルは緑枠を太く、保存済みは薄くする
+                let borderClass = isSelected ? 'border-[#059669] ring-4 ring-[#059669]/20 shadow-md' : 'border-slate-200 hover:border-slate-400';
+                let opacityClass = isSaved && !isSelected ? 'opacity-50 hover:opacity-100' : '';
+                
+                // 保存済みの「✓」オーバーレイ
+                let savedOverlay = isSaved ? `
+                    <div class="absolute inset-0 bg-white/40 backdrop-blur-[1px] flex flex-col items-center justify-center rounded-lg z-10">
+                        <div class="bg-[#059669] text-white rounded-full p-1 shadow-sm mb-0.5">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                        </div>
+                        <span class="text-[9px] font-bold text-[#059669] bg-white/90 px-2 rounded-full shadow-sm">保存済</span>
+                    </div>` : '';
+                
+                return `
+                    <div class="relative min-w-[110px] w-[110px] cursor-pointer transition-all ${opacityClass} rounded-lg group" onclick="selectFile(${index})">
+                        <div class="relative bg-white rounded-lg border-2 ${borderClass} overflow-hidden h-[75px]">
+                            <img src="data:image/jpeg;base64,${f.base64}" class="w-full h-full object-cover" alt="${f.name}">
+                            ${savedOverlay}
+                        </div>
+                        <div class="truncate text-[9px] text-slate-500 mt-1.5 text-center font-bold px-1 group-hover:text-[#059669] transition-colors" title="${f.name}">${f.name}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // ==========================================
+        // サムネイルをクリックしてファイルを選択
+        // ==========================================
+        function selectFile(index) {
+            if(index < 0 || index >= pdfFiles.length) return;
+            
+            currentSelectedIndex = index;
+            const f = pdfFiles[index];
+            
+            // メインキャンバスに描画
+            const canvas = document.getElementById('pdf-canvas');
+            const ctx = canvas.getContext('2d');
+            const img = new Image();
+            img.onload = function() {
+                canvas.width = img.width;
+                canvas.height = img.height;
+                ctx.drawImage(img, 0, 0);
+            }
+            img.src = "data:image/jpeg;base64," + f.base64;
+            
+            // UIの状態を切り替え
+            document.getElementById('preview-container').classList.remove('hidden');
+            document.getElementById('page-count-badge').innerText = `選択中: ${f.name}`;
+            document.getElementById('page-count-badge').title = f.name;
+            
+            // 実行ボタンを活性化
+            const btn = document.getElementById('analyze-btn');
+            btn.disabled = false;
+            document.getElementById('analyze-btn-text').innerText = "この画像のデータを抽出";
+            document.getElementById('img-size-info').innerText = f.status === 'saved' ? "※保存済みのファイルです" : "準備完了";
+            btn.className = "w-full accent-btn text-white py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all shadow-lg relative overflow-hidden";
+
+            // 解析結果エリアを一旦リセット
+            resetResultArea();
+            renderThumbnails(); // 枠線を更新するため再描画
+        }
+
+        // ==========================================
+        // リストをすべてクリアする
+        // ==========================================
+        function clearFiles() {
+            if(!confirm("アップロードしたファイルリストをすべてクリアしますか？")) return;
+            pdfFiles = [];
+            currentSelectedIndex = -1;
+            document.getElementById('thumbnail-container').classList.add('hidden');
+            document.getElementById('preview-container').classList.add('hidden');
+            
+            const btn = document.getElementById('analyze-btn');
+            btn.disabled = true;
+            btn.className = "w-full bg-slate-200 text-slate-500 py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all relative overflow-hidden";
+            document.getElementById('analyze-btn-text').innerText = "データ抽出を実行";
+            document.getElementById('img-size-info').innerText = "PDFを選択してください";
+            
+            resetResultArea();
+        }
+
+        // モーダル操作
+        function openModal() {
+            if (currentSelectedIndex === -1) return;
+            document.getElementById('modal-image').src = document.getElementById('pdf-canvas').toDataURL();
+            document.getElementById('image-modal').classList.remove('hidden');
+        }
+        function closeModal() { document.getElementById('image-modal').classList.add('hidden'); }
+        document.addEventListener('keydown', e => { if(e.key === 'Escape') closeModal(); });
+
+        // ==========================================
+        // 解析実行
+        // ==========================================
         document.getElementById('analyze-btn').onclick = function() {
-            if (!currentBase64Image) return;
+            if (currentSelectedIndex === -1) return;
+            const f = pdfFiles[currentSelectedIndex];
+            
             document.getElementById('loading').classList.remove('hidden');
+            document.getElementById('loading-msg').innerText = "文字を抽出・分析中...";
+            
             google.script.run
                 .withSuccessHandler(displayResult)
                 .withFailureHandler((err) => showError(err.message || err))
-                .analyzeDocumentImage(currentBase64Image, "OCR解析");
+                .analyzeDocumentImage(f.base64, "OCR解析");
         };
 
+        // 初期状態・ファイル切り替え時の結果エリア
+        function resetResultArea() {
+            document.getElementById('result-content').innerHTML = `
+                <div class="flex flex-col items-center justify-center py-32 text-slate-300">
+                    <svg class="w-16 h-16 mb-4 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 00 2 2h10a2 2 0 00 2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01m-.01 4h.01"></path></svg>
+                    <p class="text-sm font-bold text-slate-400 text-center leading-relaxed">左のリストからファイルを選び、<br>「データ抽出を実行」を押してください</p>
+                </div>
+            `;
+        }
+
         function showDummyData() {
+            if(currentSelectedIndex === -1) {
+                alert("まずはプレビュー用にPDFをアップロードして選択してください。");
+                return;
+            }
             const dummyResponse = {
-                "date": "2026/04/30",      // 元のロジックで見つける「基準日（発行日など）」
-                "startDate": "2026-04-09", // type="date"用にYYYY-MM-DD形式に変更
-                "endDate": "2026-04-22",   // type="date"用にYYYY-MM-DD形式に変更
+                "date": "2026/04/30",
+                "startDate": "",
+                "endDate": "",
                 "genbaName": "", 
                 "ownerCandidates": ["株式会社 林業テスト", "鈴木 太郎山", "中山"],
                 "summaryData": [
@@ -291,53 +489,36 @@
             displayResult(JSON.stringify(dummyResponse));
         }
 
-        // 現場名に応じて所有者のサジェスト（datalist）を更新する関数
+        // ==========================================
+        // 各種 UI ロジック群
+        // ==========================================
         function updateOwnerSuggestions() {
             const selectedGenba = document.getElementById('genba-input')?.value || "";
             const datalist = document.getElementById('owner-list');
             if (!datalist) return;
-
-            // OCRで抽出した候補をベースにする
             let candidates = [...currentOcrOwnerCandidates];
-            
-            // 選択された現場に紐づく過去の所有者をマスタから取得して追加
             if (selectedGenba) {
-                const masterOwners = ownerMasterList
-                    .filter(m => m.genba === selectedGenba)
-                    .map(m => m.owner);
+                const masterOwners = ownerMasterList.filter(m => m.genba === selectedGenba).map(m => m.owner);
                 candidates = candidates.concat(masterOwners);
             }
-            
-            // 重複を削除して datalist に反映
             const uniqueOwners = [...new Set(candidates)];
             datalist.innerHTML = uniqueOwners.map(name => `<option value="${name}"></option>`).join('');
         }
 
-        // ▼ ドロップダウン用の `<option>` 要素を生成する関数（表示用テキストを含む）
         function buildDropdownOptions(candidatesArr, isFloat) {
             let filteredArr = (candidatesArr || []).filter(val => {
                 let numVal = Number(val);
-                if (numVal === 0) return false; // 0は別途先頭に追加するためここでは除外
-                
-                if (isFloat) {
-                    return numVal % 1 !== 0 || String(val).includes('.');
-                } else {
-                    return numVal >= 1000 && numVal <= 9999999 && numVal % 1 === 0;
-                }
+                if (numVal === 0) return false; 
+                if (isFloat) return numVal % 1 !== 0 || String(val).includes('.');
+                else return numVal >= 1000 && numVal <= 9999999 && numVal % 1 === 0;
             });
-
-            let options = new Set(filteredArr);
-            let arr = Array.from(options).sort((a,b) => a - b);
-            
-            // 必ず先頭に 0 を選択肢として追加
+            let arr = Array.from(new Set(filteredArr)).sort((a,b) => a - b);
             let html = `<option value="0">0</option>`;
-            
             html += arr.map(val => {
                 let valueStr = isFloat ? Number(val).toFixed(3) : Number(val).toString();
                 let displayStr = isFloat ? Number(val).toFixed(3) : Number(val).toLocaleString();
                 return `<option value="${valueStr}">${displayStr}</option>`;
             }).join('');
-            
             return html;
         }
 
@@ -345,21 +526,16 @@
             let totalVol = 0;
             let totalAmt = 0;
             const rows = document.querySelectorAll('.data-row');
-            
             rows.forEach(row => {
-                // 手入力でカンマが含まれていた場合を考慮してカンマを除去
                 const volInput = row.querySelector('.vol-input').value.replace(/,/g, '');
                 const priceInput = row.querySelector('.price-input').value.replace(/,/g, '');
-                
                 const vol = parseFloat(volInput) || 0;
                 const price = parseInt(priceInput, 10) || 0;
                 const subtotal = Math.round(vol * price);
-                
                 row.querySelector('.subtotal-display').innerText = subtotal.toLocaleString();
                 totalVol += vol;
                 totalAmt += subtotal;
             });
-            
             document.getElementById('total-volume-display').innerText = totalVol.toLocaleString(undefined, {minimumFractionDigits: 3});
             document.getElementById('total-amount-input').value = totalAmt;
         }
@@ -383,40 +559,38 @@
                 initialTotalAmount += item.subtotal;
             });
 
-            // 所有者候補の「山」削除ルール（3文字以上 ＋ 末尾が山）を適用
             let processedOwnerCandidates = (data.ownerCandidates || []).map(name => {
                 let n = name.trim();
-                if (n.length >= 3 && n.endsWith('山')) {
-                    return n.slice(0, -1);
-                }
+                if (n.length >= 3 && n.endsWith('山')) return n.slice(0, -1);
                 return n;
             });
-            // 重複を削除してグローバル変数に保持（サジェスト更新用）
             currentOcrOwnerCandidates = [...new Set(processedOwnerCandidates)];
-            let defaultOwner = ""; // ▼ 初期値を空に変更
+            let defaultOwner = ""; 
 
-            // --- 期間（開始日・終了日）のパース処理を追加 ---
             let parsedStartDate = data.startDate || "";
             let parsedEndDate = data.endDate || "";
-            
-            // 本番環境のGASは period ("YYYY/MM/DD ～ YYYY/MM/DD") を返すので、それを input type="date" (YYYY-MM-DD) 用に分割して変換
             if (!parsedStartDate && !parsedEndDate && data.period && data.period !== "-") {
                 const parts = data.period.split(/～|~|－|-/);
                 if (parts.length >= 1) parsedStartDate = parts[0].trim().replace(/\//g, '-');
                 if (parts.length >= 2) parsedEndDate = parts[1].trim().replace(/\//g, '-');
             }
 
+            let baseDateFormatted = "";
+            if (data.date && data.date !== "未検出" && data.date !== "-") {
+                baseDateFormatted = data.date.replace(/\//g, '-');
+            }
+            if (!parsedStartDate) parsedStartDate = baseDateFormatted;
+            if (!parsedEndDate) parsedEndDate = baseDateFormatted;
+
             let html = `
                 <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 shadow-sm">
                     <div class="mb-4">
                         <label class="block text-[10px] text-[#059669] font-bold tracking-widest uppercase mb-1">現場名（施業地区 + 現場名）<span class="text-red-500 ml-1">※必須</span></label>
-                        <!-- onchange="updateOwnerSuggestions()" を追加して連動させる -->
                         <input type="text" id="genba-input" list="genba-list" value="${data.genbaName || ''}" onchange="updateOwnerSuggestions()" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-bold text-slate-800 focus:outline-none focus:border-[#059669] bg-white">
                         <datalist id="genba-list">
                             ${genbaMasterList.map(name => `<option value="${name}"></option>`).join('')}
                         </datalist>
                     </div>
-                    <!-- 事業区分のボタン -->
                     <div class="mb-4 pt-3 border-t border-slate-100">
                         <label class="block text-[10px] text-[#059669] font-bold tracking-widest uppercase mb-2">事業区分</label>
                         <div class="flex gap-2">
@@ -434,13 +608,10 @@
                             </label>
                         </div>
                     </div>
-                    <!-- 所有者のコンボボックス（直接入力＋リスト選択） -->
                     <div class="mb-4 pt-3 border-t border-slate-100">
                         <label class="block text-[10px] text-[#059669] font-bold tracking-widest uppercase mb-1">所有者（氏名・会社名）</label>
                         <input type="text" id="owner-input" list="owner-list" value="${defaultOwner}" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-bold text-slate-800 focus:outline-none focus:border-[#059669] bg-white" placeholder="現場を選択すると候補が表示されます / 直接入力も可能">
-                        <datalist id="owner-list">
-                            <!-- ここは updateOwnerSuggestions で動的に生成されます -->
-                        </datalist>
+                        <datalist id="owner-list"></datalist>
                     </div>
 
                     <div class="flex justify-between items-start pt-3 border-t border-slate-200">
@@ -450,17 +621,14 @@
                                 <div class="flex items-center gap-2">
                                     <span class="text-xs text-slate-500 font-bold">抽出基準日:</span>
                                     <span class="font-mono-num text-sm font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">${data.date || '未検出'}</span>
-                                    <!-- スプレッドシートの「日付」列に保存するための隠しデータ -->
                                     <input type="hidden" id="base-date-input" value="${data.date || ''}">
                                 </div>
                             </div>
-                            
                             <div>
                                 <p class="text-[10px] text-slate-500 font-bold mb-1">集計期間（受込日）</p>
                                 <div class="flex items-center gap-2">
                                     <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
                                     <div class="flex items-center gap-1">
-                                        <!-- パースした開始日・終了日をセット -->
                                         <input type="date" id="start-date-input" value="${parsedStartDate}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
                                         <span class="text-slate-400 text-xs font-bold px-1">〜</span>
                                         <input type="date" id="end-date-input" value="${parsedEndDate}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
@@ -489,7 +657,6 @@
                             ${summaryData.length > 0 ? summaryData.map((item, index) => `
                                 <tr class="data-row hover:bg-slate-50/50 transition-colors" data-species="${item.species}">
                                     <td class="px-4 py-3 font-bold text-slate-700">${item.species || '-'}</td>
-                                    <!-- ▼ 材積を総合計と同様のドロップダウンUIに変更 -->
                                     <td class="text-center px-2 py-2">
                                         <div class="flex items-center justify-center gap-1">
                                             <input type="text" id="vol-input-${index}" class="vol-input bg-white border border-slate-300 rounded px-2 py-1.5 font-mono-num text-xs w-20 text-right focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm text-slate-900" value="${Number(item.volume).toFixed(3)}" oninput="recalculateTotals()">
@@ -502,7 +669,6 @@
                                             </div>
                                         </div>
                                     </td>
-                                    <!-- ▼ 単価を総合計と同様のドロップダウンUIに変更 -->
                                     <td class="text-center px-2 py-2">
                                         <div class="flex items-center justify-center gap-1">
                                             <input type="text" id="price-input-${index}" class="price-input bg-white border border-slate-300 rounded px-2 py-1.5 font-mono-num text-xs w-20 text-right focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm text-slate-900" value="${item.avgPrice}" oninput="recalculateTotals()">
@@ -517,9 +683,7 @@
                                     </td>
                                     <td class="text-right px-4 py-3 font-mono-num text-slate-900 font-bold"><span class="subtotal-display">${(item.subtotal || 0).toLocaleString()}</span></td>
                                 </tr>
-                            `).join('') : `
-                                <tr><td colspan="4" class="text-center py-6 text-slate-500">集計データを抽出できませんでした。</td></tr>
-                            `}
+                            `).join('') : `<tr><td colspan="4" class="text-center py-6 text-slate-500">集計データを抽出できませんでした。</td></tr>`}
                         </tbody>
                     </table>
                 </div>
@@ -532,12 +696,10 @@
                     <div class="flex items-center gap-2">
                         <span class="text-xl font-bold">¥</span>
                         <input type="text" id="total-amount-input" class="bg-white/10 hover:bg-white/20 border-b-2 border-white/40 text-white px-2 py-1 text-2xl font-bold font-mono-num text-right w-36 focus:outline-none focus:border-white transition-colors" value="${initialTotalAmount}">
-                        
                         <div class="relative w-8 h-8 flex items-center justify-center bg-white/20 hover:bg-white/30 rounded cursor-pointer transition-colors" title="候補から選ぶ">
                             <select onchange="document.getElementById('total-amount-input').value = this.value" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-slate-900 bg-white">
                                 <option value="" disabled selected>▼</option>
-                                ${(data.priceCandidates || [])
-                                    .filter(p => Number(p) === 0 || (Number(p) >= 1000 && Number(p) <= 9999999 && Number(p) % 1 === 0))
+                                ${(data.priceCandidates || []).filter(p => Number(p) === 0 || (Number(p) >= 1000 && Number(p) <= 9999999 && Number(p) % 1 === 0))
                                     .map(p => `<option value="${p}" class="text-slate-900 bg-white">${Number(p).toLocaleString()}</option>`).join('')}
                             </select>
                             <svg class="w-4 h-4 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
@@ -551,39 +713,41 @@
                 </button>
             `;
             document.getElementById('result-content').innerHTML = html;
-            
-            // 画面生成直後に、現場名に応じて所有者サジェストを初期更新する
             updateOwnerSuggestions();
         }
 
+        // ==========================================
+        // 保存処理
+        // ==========================================
         function saveData(btn) {
+            // 重複保存の警告
+            if (currentSelectedIndex !== -1 && pdfFiles[currentSelectedIndex].status === 'saved') {
+                if (!confirm("このファイルはすでに【保存済】のマークがついています。\n重複してスプレッドシートに再度保存してもよろしいですか？")) {
+                    return;
+                }
+            }
+
             const genbaInput = document.getElementById('genba-input');
             const genbaValue = genbaInput ? genbaInput.value.trim() : "";
-
             if (!genbaValue) {
                 alert("エラー：現場名が入力または選択されていません。保存する前に現場名を指定してください。");
                 if (genbaInput) genbaInput.focus();
                 return;
             }
 
-            // --- 入力された開始日と終了日を取得し、GAS保存用のperiod文字列を生成 ---
             const startVal = document.getElementById('start-date-input') ? document.getElementById('start-date-input').value : "";
             const endVal = document.getElementById('end-date-input') ? document.getElementById('end-date-input').value : "";
             
             let periodStr = "-";
-            if (startVal && endVal) {
-                periodStr = `${startVal.replace(/-/g, '/')} ～ ${endVal.replace(/-/g, '/')}`;
-            } else if (startVal) {
-                periodStr = startVal.replace(/-/g, '/');
-            } else if (endVal) {
-                periodStr = endVal.replace(/-/g, '/');
-            }
+            if (startVal && endVal) periodStr = `${startVal.replace(/-/g, '/')} ～ ${endVal.replace(/-/g, '/')}`;
+            else if (startVal) periodStr = startVal.replace(/-/g, '/');
+            else if (endVal) periodStr = endVal.replace(/-/g, '/');
 
             const dataToSave = {
                 date: document.getElementById('base-date-input') ? document.getElementById('base-date-input').value : "", 
                 startDate: startVal,
                 endDate: endVal,
-                period: periodStr, // ★バックエンド(コード.gs)はこれを期待しているため追加して送信
+                period: periodStr, 
                 genbaName: genbaValue,
                 businessType: document.querySelector('input[name="business-type"]:checked') ? document.querySelector('input[name="business-type"]:checked').value : "",
                 ownerName: document.getElementById('owner-input') ? document.getElementById('owner-input').value.trim() : "",
@@ -592,18 +756,11 @@
                 totalAmount: parseInt(document.getElementById('total-amount-input').value.replace(/,/g, ''), 10) || 0
             };
 
-            const rows = document.querySelectorAll('.data-row');
-            rows.forEach(row => {
-                const volInput = row.querySelector('.vol-input').value.replace(/,/g, '');
-                const priceInput = row.querySelector('.price-input').value.replace(/,/g, '');
-                
-                const vol = parseFloat(volInput) || 0;
-                const price = parseInt(priceInput, 10) || 0;
+            document.querySelectorAll('.data-row').forEach(row => {
+                const vol = parseFloat(row.querySelector('.vol-input').value.replace(/,/g, '')) || 0;
+                const price = parseInt(row.querySelector('.price-input').value.replace(/,/g, ''), 10) || 0;
                 dataToSave.summaryData.push({
-                    species: row.dataset.species,
-                    volume: vol,
-                    avgPrice: price,
-                    subtotal: Math.round(vol * price)
+                    species: row.dataset.species, volume: vol, avgPrice: price, subtotal: Math.round(vol * price)
                 });
             });
 
@@ -618,7 +775,6 @@
                     btn.innerHTML = "✓ 保存完了";
                     btn.className = "w-full bg-[#059669] text-white py-4 rounded-xl font-bold shadow-md flex items-center justify-center gap-3";
                     
-                    // フロント側のマスタメモリを更新して、リロードなしで次回入力に反映させる
                     if (dataToSave.genbaName && dataToSave.ownerName) {
                         const exists = ownerMasterList.some(m => m.genba === dataToSave.genbaName && m.owner === dataToSave.ownerName);
                         if (!exists) {
@@ -627,19 +783,26 @@
                         }
                     }
 
+                    // ▼ 成功したら、現在選択しているファイルのステータスを更新してサムネイルに反映
+                    if (currentSelectedIndex !== -1) {
+                        pdfFiles[currentSelectedIndex].status = 'saved';
+                        document.getElementById('img-size-info').innerText = "※保存済みのファイルです";
+                        renderThumbnails(); 
+                    }
+
                     setTimeout(() => {
                         btn.disabled = false;
                         btn.innerHTML = originalHtml;
                         btn.className = "w-full bg-white border-2 border-[#059669] text-[#059669] py-4 rounded-xl font-bold hover:bg-[#059669] hover:text-white transition-all shadow-sm flex items-center justify-center gap-3";
-                    }, 3000);
+                    }, 2500);
                 })
                 .withFailureHandler(err => {
                     btn.disabled = false;
-                    btn.innerHTML = originalHtml; // エラー時はボタンを元に戻す
-                    
+                    btn.innerHTML = originalHtml;
                     const errMsg = String(err.message || err);
                     if (errMsg.includes("DuplicateData") || errMsg.includes("重複") || errMsg.includes("二重登録")) {
                         alert("エラー：同じ現場名・所有者・日付のデータが既に登録されています。\n二重登録はできません。");
+                        // 重複エラーの場合でも、ユーザーにとっては「既に終わってる」のと同じなのでマークをつけるか？（今回はつけない）
                     } else {
                         alert("保存に失敗しました: " + errMsg);
                     }
@@ -647,29 +810,9 @@
                 .saveToSpreadsheet(stringifiedData);
         }
 
-        function resetApp() {
-            currentBase64Image = null;
-            document.getElementById('pdf-input').value = '';
-            document.getElementById('preview-container').classList.add('hidden');
-            
-            const btn = document.getElementById('analyze-btn');
-            btn.disabled = true;
-            btn.className = "w-full bg-slate-200 text-slate-500 py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all";
-            btn.innerHTML = `<span class="text-lg">データ抽出を実行</span><span id="img-size-info" class="text-[9px] font-normal opacity-80 italic">PDFを選択してください</span>`;
-            
-            document.getElementById('result-content').innerHTML = `
-                <div class="flex flex-col items-center justify-center py-32 text-slate-300">
-                    <svg class="w-16 h-16 mb-4 opacity-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 00 2 2h10a2 2 0 00 2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01m-.01 4h.01"></path></svg>
-                    <p class="text-sm italic text-center">解析結果がここに表示されます</p>
-                </div>
-            `;
-        }
-
         function showError(err) {
             document.getElementById('loading').classList.add('hidden');
-            
             const formattedErr = String(err.message || err).replace(/\n/g, '<br>');
-            
             document.getElementById('result-content').innerHTML = `
                 <div class="bg-red-50 text-red-600 p-8 rounded-2xl border border-red-100 flex flex-col items-center text-center gap-4">
                     <div class="bg-red-100 p-4 rounded-full">
@@ -677,10 +820,8 @@
                     </div>
                     <div class="w-full">
                         <p class="font-bold text-sm text-red-800">抽出エラーが発生しました</p>
-                        <!-- 改行を反映させたメッセージを出力 -->
                         <div class="mt-4 text-red-800 leading-relaxed text-xs text-left bg-red-100 p-3 rounded">${formattedErr}</div>
                     </div>
-                    <button onclick="resetApp()" class="mt-4 px-6 py-2 bg-white border border-red-200 rounded-lg text-xs font-bold hover:bg-red-50 shadow-sm transition-colors">初期画面に戻る</button>
                 </div>
             `;
         }
