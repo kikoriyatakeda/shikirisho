@@ -15,6 +15,9 @@
         .accent-btn:hover { background-color: #047857; transform: translateY(-1px); }
         .accent-btn:disabled { background-color: #cbd5e1; transform: none; cursor: not-allowed; }
         #pdf-canvas { max-width: 100%; height: auto; border: 1px solid #e2e8f0; border-radius: 0.5rem; }
+        /* input[type="number"]のスピンボタンを隠す */
+        input[type=number]::-webkit-inner-spin-button, 
+        input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     </style>
 </head>
 <body class="p-4 lg:p-8 relative">
@@ -22,14 +25,15 @@
         <header class="mb-8 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div>
                 <h1 class="text-2xl font-bold text-slate-800 border-l-4 border-[#059669] pl-4">林業検収・積算アシスタント</h1>
-                <p class="text-sm text-slate-500 mt-1">期間抽出（案B：年補完）に対応しました</p>
+                <p class="text-sm text-slate-500 mt-1">集計表から樹種・材積・単価を自動判別します</p>
             </div>
             <div class="flex items-center gap-2">
-                <span class="bg-white px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200 text-[#059669]">Ver 3.9 (期間抽出・12列対応)</span>
+                <span class="bg-white px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200 text-[#059669]">Ver 3.8 (所有者初期値空)</span>
             </div>
         </header>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            <!-- 左カラム -->
             <div class="lg:col-span-5 space-y-6">
                 <div class="bento-card">
                     <h2 class="font-bold mb-4 flex items-center gap-2 text-slate-700 text-sm">
@@ -42,271 +46,553 @@
                             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"></path></svg>
                         </div>
                         <p class="font-bold text-slate-700">PDFを選択</p>
+                        <p class="text-[10px] text-slate-400 mt-1 italic">※1ページ目の左上（集計表）のみを抽出します</p>
                     </div>
                 </div>
+
                 <div class="bento-card hidden" id="preview-container">
-                    <div class="flex justify-center bg-slate-100 p-2 rounded-lg overflow-y-auto max-h-[350px] cursor-pointer relative group" onclick="openModal()">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="font-bold text-slate-700 text-xs text-[#059669]">抽出領域プレビュー</h2>
+                        <span id="page-count-badge" class="bg-slate-100 text-slate-600 text-[10px] px-2 py-1 rounded">--</span>
+                    </div>
+                    <!-- クリックでモーダルを開く -->
+                    <div class="flex justify-center bg-slate-100 p-2 rounded-lg overflow-y-auto max-h-[350px] cursor-pointer hover:opacity-90 transition-opacity relative group" onclick="openModal()">
                         <canvas id="pdf-canvas"></canvas>
+                        <div class="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/10 rounded-lg">
+                            <span class="bg-slate-800 text-white text-xs px-3 py-1 rounded-full flex items-center gap-1 shadow-lg">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7"></path></svg>
+                                拡大して確認（比較用）
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>
 
+            <!-- 右カラム -->
             <div class="lg:col-span-7 space-y-6">
                 <div class="bento-card p-4">
                     <button id="analyze-btn" disabled class="w-full bg-slate-200 text-slate-500 py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all">
                         <span class="text-lg">データ抽出を実行</span>
+                        <span id="img-size-info" class="text-[9px] font-normal opacity-80 italic">PDFを選択してください</span>
                     </button>
-                    <button onclick="showDummyData()" class="mt-4 w-full text-[11px] text-slate-400 hover:text-slate-600 underline text-center">ダミーデータでプレビュー表示</button>
+                    <!-- テスト用ダミーデータ呼び出しリンク -->
+                    <button onclick="showDummyData()" class="mt-4 w-full text-[11px] text-slate-400 hover:text-slate-600 underline text-center transition-colors">
+                        プレビュー確認用：ダミーデータで結果を表示
+                    </button>
                 </div>
+
                 <div class="bento-card min-h-[450px] relative overflow-hidden" id="result-card">
                     <div id="loading" class="hidden absolute inset-0 bg-white/95 backdrop-blur-sm z-10 flex flex-col items-center justify-center rounded-xl text-center p-6">
                         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[#059669] mb-4"></div>
-                        <p class="text-sm text-slate-600 font-bold italic">抽出・分析中...</p>
+                        <p class="text-sm text-slate-600 font-bold italic">文字を抽出・分析中...</p>
+                        <p class="text-[10px] text-slate-400 mt-2 max-w-[200px]">少々お待ちください</p>
                     </div>
-                    <div id="result-content" class="flex flex-col items-center justify-center py-32 text-slate-300 italic text-sm">解析結果がここに表示されます</div>
+                    
+                    <div id="result-content">
+                        <div class="flex flex-col items-center justify-center py-32 text-slate-300">
+                            <svg class="w-16 h-16 mb-4 opacity-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 00 2 2h10a2 2 0 00 2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01m-.01 4h.01"></path></svg>
+                            <p class="text-sm italic text-center">解析結果がここに表示されます</p>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <div id="image-modal" class="hidden fixed bottom-44 left-44 z-50 w-[45vw] max-w-2xl bg-white shadow-2xl rounded-xl border border-slate-200 overflow-hidden">
-        <div class="p-2 bg-slate-100 overflow-auto max-h-[60vh]"><img id="modal-image" src="" class="w-full h-auto object-contain rounded-lg bg-white"></div>
+    <!-- 拡大プレビュー用フローティングパネル -->
+    <div id="image-modal" class="hidden fixed bottom-44 left-44 z-50 w-[45vw] max-w-2xl bg-white shadow-2xl rounded-xl border border-slate-200 overflow-hidden transition-all animate-fade-in-up">
+        <div class="flex justify-between items-center p-3 border-b border-slate-100 bg-slate-50">
+            <h3 class="font-bold text-slate-700 text-sm flex items-center gap-2">
+                <svg class="w-4 h-4 text-[#059669]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                プレビュー拡大（比較用）
+            </h3>
+            <button onclick="closeModal()" class="text-slate-400 hover:text-slate-600 hover:bg-slate-200 p-1 rounded-full transition-colors">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        <div class="p-2 bg-slate-100 overflow-auto max-h-[60vh]">
+            <img id="modal-image" src="" alt="拡大プレビュー" class="w-full h-auto object-contain rounded-lg border border-slate-200 bg-white">
+        </div>
     </div>
+
+    <style>
+        @keyframes fadeInUp {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in-up { animation: fadeInUp 0.3s ease-out; }
+    </style>
 
     <script>
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.4.120/pdf.worker.min.js';
+
         let currentBase64Image = null;
-        let genbaMasterList = [], ownerMasterList = [], currentOcrOwnerCandidates = [];
+        let genbaMasterList = []; 
+        let ownerMasterList = []; // 所有者マスタを保持する配列
+        let currentOcrOwnerCandidates = []; // OCRで抽出した所有者候補を保持する配列
 
         window.onload = function() {
-            google.script.run.withSuccessHandler(data => { 
-                genbaMasterList = data.genbaList || []; 
-                ownerMasterList = data.ownerMaster || [];
-            }).getInitialData(); 
+            google.script.run
+                .withSuccessHandler(data => { 
+                    genbaMasterList = data.genbaList || []; 
+                    ownerMasterList = data.ownerMaster || [];
+                })
+                .withFailureHandler(err => console.error("マスタ取得エラー:", err))
+                .getInitialData(); 
         };
 
+        // モーダル操作
         function openModal() {
             if (!currentBase64Image) return;
             document.getElementById('modal-image').src = document.getElementById('pdf-canvas').toDataURL();
             document.getElementById('image-modal').classList.remove('hidden');
         }
         function closeModal() { document.getElementById('image-modal').classList.add('hidden'); }
+        document.addEventListener('keydown', e => { if(e.key === 'Escape') closeModal(); });
 
         document.getElementById('pdf-input').onchange = async function(e) {
             const file = e.target.files[0];
             if (!file) return;
-            const typedarray = new Uint8Array(await file.arrayBuffer());
-            const pdf = await pdfjsLib.getDocument(typedarray).promise;
-            const page = await pdf.getPage(1);
-            const viewport = page.getViewport({ scale: 1.5 });
-            const canvas = document.getElementById('pdf-canvas');
-            const context = canvas.getContext('2d');
-            canvas.width = viewport.width * 0.64;
-            canvas.height = viewport.height * 0.37;
-            await page.render({ canvasContext: context, viewport: viewport }).promise;
-            currentBase64Image = canvas.toDataURL('image/jpeg', 0.6).replace(/^data:image\/jpeg;base64,/, "");
-            document.getElementById('preview-container').classList.remove('hidden');
+
             const btn = document.getElementById('analyze-btn');
-            btn.disabled = false;
-            btn.className = "w-full accent-btn text-white py-4 rounded-xl font-bold shadow-lg";
+            btn.disabled = true;
+            btn.innerHTML = `<span>PDF処理中...</span>`;
+
+            const reader = new FileReader();
+            reader.onload = async function() {
+                try {
+                    const typedarray = new Uint8Array(this.result);
+                    const pdf = await pdfjsLib.getDocument(typedarray).promise;
+                    
+                    document.getElementById('page-count-badge').innerText = `1ページ目 (左上 超限定抽出)`;
+                    const canvas = document.getElementById('pdf-canvas');
+                    const context = canvas.getContext('2d');
+                    
+                    const page = await pdf.getPage(1);
+                    const viewport = page.getViewport({ scale: 1.5 });
+                    
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = viewport.width;
+                    tempCanvas.height = viewport.height;
+                    const tempContext = tempCanvas.getContext('2d');
+                    tempContext.fillStyle = "white";
+                    tempContext.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+                    
+                    await page.render({ canvasContext: tempContext, viewport: viewport }).promise;
+                    
+                    const cropWidth = viewport.width * 0.64;
+                    const cropHeight = viewport.height * 0.37;
+                    
+                    canvas.width = cropWidth;
+                    canvas.height = cropHeight;
+                    context.drawImage(tempCanvas, 0, 0, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+                    
+                    currentBase64Image = canvas.toDataURL('image/jpeg', 0.6).replace(/^data:image\/jpeg;base64,/, "");
+                    
+                    document.getElementById('preview-container').classList.remove('hidden');
+                    btn.disabled = false;
+                    btn.innerHTML = `<span class="text-lg">データ抽出を実行</span><span id="img-size-info" class="text-[10px] font-normal opacity-80 italic">準備完了</span>`;
+                    btn.className = "w-full accent-btn text-white py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all shadow-lg";
+                } catch (err) {
+                    showError("PDFの処理に失敗: " + err.message);
+                }
+            };
+            reader.readAsArrayBuffer(file);
         };
 
         document.getElementById('analyze-btn').onclick = function() {
             if (!currentBase64Image) return;
             document.getElementById('loading').classList.remove('hidden');
-            google.script.run.withSuccessHandler(displayResult).withFailureHandler(err => showError(err.message || err)).analyzeDocumentImage(currentBase64Image);
+            google.script.run
+                .withSuccessHandler(displayResult)
+                .withFailureHandler((err) => showError(err.message || err))
+                .analyzeDocumentImage(currentBase64Image, "OCR解析");
         };
 
+        function showDummyData() {
+            const dummyResponse = {
+                "date": "2026/04/30",      // 元のロジックで見つける「基準日（発行日など）」
+                "startDate": "2026-04-09", // type="date"用にYYYY-MM-DD形式に変更
+                "endDate": "2026-04-22",   // type="date"用にYYYY-MM-DD形式に変更
+                "genbaName": "", 
+                "ownerCandidates": ["株式会社 林業テスト", "鈴木 太郎山", "中山"],
+                "summaryData": [
+                    { "species": "スギ", "volume": 41.659, "avgPrice": 11471 },
+                    { "species": "ヒノキ", "volume": 21.012, "avgPrice": 15271 },
+                    { "species": "その他", "volume": 0, "avgPrice": 0 }
+                ],
+                "volumeCandidates": [0, 10.000, 11.471, 21.012, 41.659],
+                "priceCandidates": [0, 500, 11471, 15271, 39937, 79875, 798755]
+            };
+            displayResult(JSON.stringify(dummyResponse));
+        }
+
+        // 現場名に応じて所有者のサジェスト（datalist）を更新する関数
         function updateOwnerSuggestions() {
             const selectedGenba = document.getElementById('genba-input')?.value || "";
             const datalist = document.getElementById('owner-list');
             if (!datalist) return;
+
+            // OCRで抽出した候補をベースにする
             let candidates = [...currentOcrOwnerCandidates];
+            
+            // 選択された現場に紐づく過去の所有者をマスタから取得して追加
             if (selectedGenba) {
-                const masterOwners = ownerMasterList.filter(m => m.genba === selectedGenba).map(m => m.owner);
+                const masterOwners = ownerMasterList
+                    .filter(m => m.genba === selectedGenba)
+                    .map(m => m.owner);
                 candidates = candidates.concat(masterOwners);
             }
+            
+            // 重複を削除して datalist に反映
             const uniqueOwners = [...new Set(candidates)];
             datalist.innerHTML = uniqueOwners.map(name => `<option value="${name}"></option>`).join('');
         }
 
-        function buildDropdownOptions(arr, isFloat) {
-            let filtered = (arr || []).filter(val => {
-                let n = Number(val);
-                if (n === 0) return false;
-                return isFloat ? (n % 1 !== 0 || String(val).includes('.')) : (n >= 1000 && n <= 9999999);
+        // ▼ ドロップダウン用の `<option>` 要素を生成する関数（表示用テキストを含む）
+        function buildDropdownOptions(candidatesArr, isFloat) {
+            let filteredArr = (candidatesArr || []).filter(val => {
+                let numVal = Number(val);
+                if (numVal === 0) return false; // 0は別途先頭に追加するためここでは除外
+                
+                if (isFloat) {
+                    return numVal % 1 !== 0 || String(val).includes('.');
+                } else {
+                    return numVal >= 1000 && numVal <= 9999999 && numVal % 1 === 0;
+                }
             });
-            let unique = Array.from(new Set(filtered)).sort((a,b) => a - b);
+
+            let options = new Set(filteredArr);
+            let arr = Array.from(options).sort((a,b) => a - b);
+            
+            // 必ず先頭に 0 を選択肢として追加
             let html = `<option value="0">0</option>`;
-            html += unique.map(val => `<option value="${isFloat?Number(val).toFixed(3):val}">${isFloat?Number(val).toFixed(3):Number(val).toLocaleString()}</option>`).join('');
+            
+            html += arr.map(val => {
+                let valueStr = isFloat ? Number(val).toFixed(3) : Number(val).toString();
+                let displayStr = isFloat ? Number(val).toFixed(3) : Number(val).toLocaleString();
+                return `<option value="${valueStr}">${displayStr}</option>`;
+            }).join('');
+            
             return html;
         }
 
         function recalculateTotals() {
-            let tv = 0, ta = 0;
-            document.querySelectorAll('.data-row').forEach(row => {
-                const v = parseFloat(row.querySelector('.vol-input').value.replace(/,/g, '')) || 0;
-                const p = parseInt(row.querySelector('.price-input').value.replace(/,/g, ''), 10) || 0;
-                const s = Math.round(v * p);
-                row.querySelector('.subtotal-display').innerText = s.toLocaleString();
-                tv += v; ta += s;
+            let totalVol = 0;
+            let totalAmt = 0;
+            const rows = document.querySelectorAll('.data-row');
+            
+            rows.forEach(row => {
+                // 手入力でカンマが含まれていた場合を考慮してカンマを除去
+                const volInput = row.querySelector('.vol-input').value.replace(/,/g, '');
+                const priceInput = row.querySelector('.price-input').value.replace(/,/g, '');
+                
+                const vol = parseFloat(volInput) || 0;
+                const price = parseInt(priceInput, 10) || 0;
+                const subtotal = Math.round(vol * price);
+                
+                row.querySelector('.subtotal-display').innerText = subtotal.toLocaleString();
+                totalVol += vol;
+                totalAmt += subtotal;
             });
-            document.getElementById('total-volume-display').innerText = tv.toLocaleString(undefined, {minimumFractionDigits: 3});
-            document.getElementById('total-amount-input').value = ta;
+            
+            document.getElementById('total-volume-display').innerText = totalVol.toLocaleString(undefined, {minimumFractionDigits: 3});
+            document.getElementById('total-amount-input').value = totalAmt;
         }
 
-        function displayResult(raw) {
+        function displayResult(rawResponse) {
             document.getElementById('loading').classList.add('hidden');
-            let data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+            let data;
+            try { data = typeof rawResponse === 'string' ? JSON.parse(rawResponse) : rawResponse; } 
+            catch (e) { showError("抽出失敗。画像が不鮮明です。"); return; }
             if (data.error) { showError(data.error); return; }
 
             const summaryData = data.summaryData || [];
-            let totalVol = 0, totalAmt = 0;
+            let initialTotalVolume = 0;
+            let initialTotalAmount = 0;
+            
             summaryData.forEach(item => {
-                item.subtotal = Math.round(item.volume * item.avgPrice);
-                totalVol += item.volume; totalAmt += item.subtotal;
+                const vol = Number(item.volume) || 0;
+                const price = Number(item.avgPrice) || 0;
+                item.subtotal = Math.round(vol * price);
+                initialTotalVolume += vol;
+                initialTotalAmount += item.subtotal;
             });
 
-            currentOcrOwnerCandidates = [...new Set((data.ownerCandidates || []).map(n => n.length >= 3 && n.endsWith('山') ? n.slice(0, -1) : n))];
+            // 所有者候補の「山」削除ルール（3文字以上 ＋ 末尾が山）を適用
+            let processedOwnerCandidates = (data.ownerCandidates || []).map(name => {
+                let n = name.trim();
+                if (n.length >= 3 && n.endsWith('山')) {
+                    return n.slice(0, -1);
+                }
+                return n;
+            });
+            // 重複を削除してグローバル変数に保持（サジェスト更新用）
+            currentOcrOwnerCandidates = [...new Set(processedOwnerCandidates)];
+            let defaultOwner = ""; // ▼ 初期値を空に変更
 
             let html = `
-                <div class="bg-slate-50 p-4 rounded-xl border mb-6 shadow-sm">
+                <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 mb-6 shadow-sm">
                     <div class="mb-4">
-                        <label class="block text-[10px] text-[#059669] font-bold mb-1">現場名 ※必須</label>
-                        <input type="text" id="genba-input" list="genba-list" onchange="updateOwnerSuggestions()" class="w-full px-3 py-2 border rounded-md text-sm font-bold bg-white">
-                        <datalist id="genba-list">${genbaMasterList.map(name => `<option value="${name}"></option>`).join('')}</datalist>
+                        <label class="block text-[10px] text-[#059669] font-bold tracking-widest uppercase mb-1">現場名（施業地区 + 現場名）<span class="text-red-500 ml-1">※必須</span></label>
+                        <!-- onchange="updateOwnerSuggestions()" を追加して連動させる -->
+                        <input type="text" id="genba-input" list="genba-list" value="${data.genbaName || ''}" onchange="updateOwnerSuggestions()" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-bold text-slate-800 focus:outline-none focus:border-[#059669] bg-white">
+                        <datalist id="genba-list">
+                            ${genbaMasterList.map(name => `<option value="${name}"></option>`).join('')}
+                        </datalist>
                     </div>
-                    <div class="mb-4 pt-3 border-t">
-                        <label class="block text-[10px] text-[#059669] font-bold mb-2">事業区分</label>
+                    <!-- 事業区分のボタン -->
+                    <div class="mb-4 pt-3 border-t border-slate-100">
+                        <label class="block text-[10px] text-[#059669] font-bold tracking-widest uppercase mb-2">事業区分</label>
                         <div class="flex gap-2">
-                            ${['間伐','皆伐','支障木'].map((v, i) => `
-                                <label class="flex-1 cursor-pointer">
-                                    <input type="radio" name="business-type" value="${v}" class="peer hidden" ${i===0?'checked':''}>
-                                    <div class="text-center py-2 text-sm font-bold text-slate-500 bg-white border rounded peer-checked:bg-[#059669] peer-checked:text-white transition-colors shadow-sm">${v}</div>
-                                </label>
-                            `).join('')}
+                            <label class="flex-1 cursor-pointer">
+                                <input type="radio" name="business-type" value="間伐" class="peer hidden" checked>
+                                <div class="text-center px-3 py-2 text-sm font-bold text-slate-500 bg-white border border-slate-300 rounded-md peer-checked:bg-[#059669] peer-checked:text-white peer-checked:border-[#059669] transition-colors shadow-sm">間伐</div>
+                            </label>
+                            <label class="flex-1 cursor-pointer">
+                                <input type="radio" name="business-type" value="皆伐" class="peer hidden">
+                                <div class="text-center px-3 py-2 text-sm font-bold text-slate-500 bg-white border border-slate-300 rounded-md peer-checked:bg-[#059669] peer-checked:text-white peer-checked:border-[#059669] transition-colors shadow-sm">皆伐</div>
+                            </label>
+                            <label class="flex-1 cursor-pointer">
+                                <input type="radio" name="business-type" value="支障木" class="peer hidden">
+                                <div class="text-center px-3 py-2 text-sm font-bold text-slate-500 bg-white border border-slate-300 rounded-md peer-checked:bg-[#059669] peer-checked:text-white peer-checked:border-[#059669] transition-colors shadow-sm">支障木</div>
+                            </label>
                         </div>
                     </div>
-                    <div class="mb-4 pt-3 border-t">
-                        <label class="block text-[10px] text-[#059669] font-bold mb-1">所有者</label>
-                        <input type="text" id="owner-input" list="owner-list" class="w-full px-3 py-2 border rounded-md text-sm font-bold bg-white" placeholder="直接入力 または 現場を選択">
-                        <datalist id="owner-list"></datalist>
+                    <!-- 所有者のコンボボックス（直接入力＋リスト選択） -->
+                    <div class="mb-4 pt-3 border-t border-slate-100">
+                        <label class="block text-[10px] text-[#059669] font-bold tracking-widest uppercase mb-1">所有者（氏名・会社名）</label>
+                        <input type="text" id="owner-input" list="owner-list" value="${defaultOwner}" class="w-full px-3 py-2 border border-slate-300 rounded-md text-sm font-bold text-slate-800 focus:outline-none focus:border-[#059669] bg-white" placeholder="現場を選択すると候補が表示されます / 直接入力も可能">
+                        <datalist id="owner-list">
+                            <!-- ここは updateOwnerSuggestions で動的に生成されます -->
+                        </datalist>
                     </div>
-                    <div class="flex justify-between items-start pt-3 border-t">
-                        <div>
-                            <p class="text-[10px] text-[#059669] font-bold uppercase">Target Scope</p>
-                            <div class="flex flex-col mt-1">
-                                <span id="period-display" class="font-bold text-slate-800 text-xs">${data.period || '-'}</span>
-                                <span id="date-display" class="font-mono-num text-[10px] text-slate-400">${data.date || ''}</span>
+
+                    <div class="flex justify-between items-start pt-3 border-t border-slate-200">
+                        <div class="space-y-3">
+                            <div>
+                                <p class="text-[10px] text-[#059669] font-bold tracking-widest uppercase mb-1">Target Scope</p>
+                                <div class="flex items-center gap-2">
+                                    <span class="text-xs text-slate-500 font-bold">抽出基準日:</span>
+                                    <span class="font-mono-num text-sm font-bold text-slate-800 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">${data.date || '未検出'}</span>
+                                    <!-- スプレッドシートの「日付」列に保存するための隠しデータ -->
+                                    <input type="hidden" id="base-date-input" value="${data.date || ''}">
+                                </div>
+                            </div>
+                            
+                            <div>
+                                <p class="text-[10px] text-slate-500 font-bold mb-1">集計期間（受込日）</p>
+                                <div class="flex items-center gap-2">
+                                    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                                    <div class="flex items-center gap-1">
+                                        <input type="date" id="start-date-input" value="${data.startDate || ''}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
+                                        <span class="text-slate-400 text-xs font-bold px-1">〜</span>
+                                        <input type="date" id="end-date-input" value="${data.endDate || ''}" class="bg-white border border-slate-300 rounded px-2 py-1.5 text-xs font-mono-num text-slate-700 focus:outline-none focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm cursor-pointer">
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <div class="text-right">
-                            <p class="text-[10px] text-slate-400 font-bold">TOTAL VOLUME</p>
-                            <p class="font-mono-num text-xl font-bold text-[#059669]"><span id="total-volume-display">${totalVol.toLocaleString(undefined, {minimumFractionDigits: 3})}</span> <span class="text-xs font-normal">m³</span></p>
+                            <p class="text-[10px] text-slate-400 font-bold tracking-widest">TOTAL VOLUME</p>
+                            <p class="font-mono-num text-xl font-bold text-[#059669]"><span id="total-volume-display">${initialTotalVolume.toLocaleString(undefined, {minimumFractionDigits: 3})}</span> <span class="text-xs font-normal">m³</span></p>
                         </div>
                     </div>
                 </div>
 
-                <div class="overflow-x-auto border rounded-xl mb-6 shadow-sm bg-white">
+                <div class="overflow-x-auto border border-slate-100 rounded-xl mb-6 shadow-sm bg-white">
                     <table class="w-full text-[11px]">
-                        <thead class="bg-slate-50 text-slate-400 border-b text-[10px] uppercase">
-                            <tr><th class="text-left font-bold px-4 py-3">樹種</th><th class="px-2 py-3">材積(m³)</th><th class="px-2 py-3">単価(円)</th><th class="text-right font-bold px-4 py-3">小計</th></tr>
+                        <thead class="bg-slate-50 text-slate-400 border-b border-slate-100 text-[10px] uppercase tracking-wider">
+                            <tr>
+                                <th class="text-left font-bold px-4 py-3">樹種</th>
+                                <th class="text-center font-bold px-2 py-3">材積(m³) <span class="text-[8px] font-normal text-[#059669]">▼選択・手入力</span></th>
+                                <th class="text-center font-bold px-2 py-3">平均単価(円) <span class="text-[8px] font-normal text-[#059669]">▼選択・手入力</span></th>
+                                <th class="text-right font-bold px-4 py-3">小計(円)</th>
+                            </tr>
                         </thead>
-                        <tbody class="divide-y">
-                            ${summaryData.map((item, index) => `
-                                <tr class="data-row hover:bg-slate-50/50" data-species="${item.species}">
-                                    <td class="px-4 py-3 font-bold text-slate-700">${item.species}</td>
-                                    <td class="px-2 py-2 text-center">
-                                        <div class="flex items-center gap-1 justify-center">
-                                            <input type="text" id="vol-in-${index}" class="vol-input border rounded px-1.5 py-1 font-mono-num text-xs w-16 text-right" value="${Number(item.volume).toFixed(3)}" oninput="recalculateTotals()">
-                                            <div class="relative w-6 h-6 flex items-center justify-center bg-slate-100 rounded border cursor-pointer">
-                                                <select onchange="document.getElementById('vol-in-${index}').value=this.value;recalculateTotals()" class="absolute inset-0 opacity-0 cursor-pointer">
-                                                    <option value="" disabled selected>▼</option>${buildDropdownOptions(data.volumeCandidates, true)}
+                        <tbody class="divide-y divide-slate-50">
+                            ${summaryData.length > 0 ? summaryData.map((item, index) => `
+                                <tr class="data-row hover:bg-slate-50/50 transition-colors" data-species="${item.species}">
+                                    <td class="px-4 py-3 font-bold text-slate-700">${item.species || '-'}</td>
+                                    <!-- ▼ 材積を総合計と同様のドロップダウンUIに変更 -->
+                                    <td class="text-center px-2 py-2">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <input type="text" id="vol-input-${index}" class="vol-input bg-white border border-slate-300 rounded px-2 py-1.5 font-mono-num text-xs w-20 text-right focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm text-slate-900" value="${Number(item.volume).toFixed(3)}" oninput="recalculateTotals()">
+                                            <div class="relative w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded cursor-pointer transition-colors" title="候補から選ぶ">
+                                                <select onchange="document.getElementById('vol-input-${index}').value = this.value; recalculateTotals();" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-slate-900 bg-white">
+                                                    <option value="" disabled selected>▼</option>
+                                                    ${buildDropdownOptions(data.volumeCandidates, true)}
                                                 </select>
-                                                <svg class="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"></path></svg>
+                                                <svg class="w-3 h-3 text-slate-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="px-2 py-2 text-center">
-                                        <div class="flex items-center gap-1 justify-center">
-                                            <input type="text" id="pri-in-${index}" class="price-input border rounded px-1.5 py-1 font-mono-num text-xs w-16 text-right" value="${item.avgPrice}" oninput="recalculateTotals()">
-                                            <div class="relative w-6 h-6 flex items-center justify-center bg-slate-100 rounded border cursor-pointer">
-                                                <select onchange="document.getElementById('pri-in-${index}').value=this.value;recalculateTotals()" class="absolute inset-0 opacity-0 cursor-pointer">
-                                                    <option value="" disabled selected>▼</option>${buildDropdownOptions(data.priceCandidates, false)}
+                                    <!-- ▼ 単価を総合計と同様のドロップダウンUIに変更 -->
+                                    <td class="text-center px-2 py-2">
+                                        <div class="flex items-center justify-center gap-1">
+                                            <input type="text" id="price-input-${index}" class="price-input bg-white border border-slate-300 rounded px-2 py-1.5 font-mono-num text-xs w-20 text-right focus:border-[#059669] focus:ring-1 focus:ring-[#059669] shadow-sm text-slate-900" value="${item.avgPrice}" oninput="recalculateTotals()">
+                                            <div class="relative w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded cursor-pointer transition-colors" title="候補から選ぶ">
+                                                <select onchange="document.getElementById('price-input-${index}').value = this.value; recalculateTotals();" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-slate-900 bg-white">
+                                                    <option value="" disabled selected>▼</option>
+                                                    ${buildDropdownOptions(data.priceCandidates, false)}
                                                 </select>
-                                                <svg class="w-3 h-3 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"></path></svg>
+                                                <svg class="w-3 h-3 text-slate-600 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                                             </div>
                                         </div>
                                     </td>
-                                    <td class="text-right px-4 py-3 font-mono-num font-bold"><span class="subtotal-display">${item.subtotal.toLocaleString()}</span></td>
+                                    <td class="text-right px-4 py-3 font-mono-num text-slate-900 font-bold"><span class="subtotal-display">${(item.subtotal || 0).toLocaleString()}</span></td>
                                 </tr>
-                            `).join('')}
+                            `).join('') : `
+                                <tr><td colspan="4" class="text-center py-6 text-slate-500">集計データを抽出できませんでした。</td></tr>
+                            `}
                         </tbody>
                     </table>
                 </div>
 
                 <div class="bg-[#059669] p-4 rounded-xl flex justify-between items-center mb-6 text-white shadow-lg">
-                    <span class="font-bold text-sm">総合計金額</span>
+                    <div class="flex flex-col">
+                        <span class="text-[10px] font-bold opacity-80 uppercase tracking-widest">Total Result</span>
+                        <span class="font-bold text-sm">総合計金額 <span class="text-[9px] font-normal opacity-80 ml-1">※手入力・▼選択</span></span>
+                    </div>
                     <div class="flex items-center gap-2">
                         <span class="text-xl font-bold">¥</span>
-                        <input type="text" id="total-amount-input" class="bg-white/10 border-b-2 border-white/40 text-white px-2 py-1 text-2xl font-bold text-right w-32 outline-none" value="${totalAmt}">
-                        <div class="relative w-7 h-7 flex items-center justify-center bg-white/20 rounded cursor-pointer">
-                            <select onchange="document.getElementById('total-amount-input').value=this.value" class="absolute inset-0 opacity-0 cursor-pointer">
+                        <input type="text" id="total-amount-input" class="bg-white/10 hover:bg-white/20 border-b-2 border-white/40 text-white px-2 py-1 text-2xl font-bold font-mono-num text-right w-36 focus:outline-none focus:border-white transition-colors" value="${initialTotalAmount}">
+                        
+                        <div class="relative w-8 h-8 flex items-center justify-center bg-white/20 hover:bg-white/30 rounded cursor-pointer transition-colors" title="候補から選ぶ">
+                            <select onchange="document.getElementById('total-amount-input').value = this.value" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer text-slate-900 bg-white">
                                 <option value="" disabled selected>▼</option>
-                                ${(data.priceCandidates || []).filter(p => Number(p) === 0 || Number(p) >= 1000).map(p => `<option value="${p}">${Number(p).toLocaleString()}</option>`).join('')}
+                                ${(data.priceCandidates || [])
+                                    .filter(p => Number(p) === 0 || (Number(p) >= 1000 && Number(p) <= 9999999 && Number(p) % 1 === 0))
+                                    .map(p => `<option value="${p}" class="text-slate-900 bg-white">${Number(p).toLocaleString()}</option>`).join('')}
                             </select>
-                            <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 9l-7 7-7-7"></path></svg>
+                            <svg class="w-4 h-4 text-white pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
                         </div>
                     </div>
                 </div>
 
-                <button id="save-btn" onclick="saveData(this)" class="w-full bg-white border-2 border-[#059669] text-[#059669] py-4 rounded-xl font-bold hover:bg-[#059669] hover:text-white transition-all flex items-center justify-center gap-3">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M8 7H5a2 2 0 00-2 2v9a2 2 0 00 2 2h14a2 2 0 00 2-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
+                <button id="save-btn" onclick="saveData(this)" class="w-full bg-white border-2 border-[#059669] text-[#059669] py-4 rounded-xl font-bold hover:bg-[#059669] hover:text-white transition-all shadow-sm flex items-center justify-center gap-3">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7H5a2 2 0 00-2 2v9a2 2 0 00 2 2h14a2 2 0 00 2-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4"></path></svg>
                     <span>スプレッドシートへ保存</span>
                 </button>
             `;
             document.getElementById('result-content').innerHTML = html;
+            
+            // 画面生成直後に、現場名に応じて所有者サジェストを初期更新する
             updateOwnerSuggestions();
         }
 
         function saveData(btn) {
-            const genba = document.getElementById('genba-input')?.value.trim();
-            if (!genba) { alert("エラー：現場名を入力してください。"); return; }
+            const genbaInput = document.getElementById('genba-input');
+            const genbaValue = genbaInput ? genbaInput.value.trim() : "";
+
+            if (!genbaValue) {
+                alert("エラー：現場名が入力または選択されていません。保存する前に現場名を指定してください。");
+                if (genbaInput) genbaInput.focus();
+                return;
+            }
+
             const dataToSave = {
-                genbaName: genba,
-                businessType: document.querySelector('input[name="business-type"]:checked')?.value || "",
-                ownerName: document.getElementById('owner-input')?.value.trim() || "",
-                period: document.getElementById('period-display')?.innerText || "-",
-                date: document.getElementById('date-display')?.innerText || "-",
-                summaryData: Array.from(document.querySelectorAll('.data-row')).map(row => {
-                    const v = parseFloat(row.querySelector('.vol-input').value.replace(/,/g, '')) || 0;
-                    const p = parseInt(row.querySelector('.price-input').value.replace(/,/g, ''), 10) || 0;
-                    return { species: row.dataset.species, volume: v, avgPrice: p, subtotal: Math.round(v * p) };
-                }),
+                date: document.getElementById('base-date-input') ? document.getElementById('base-date-input').value : "", // 抽出基準日
+                startDate: document.getElementById('start-date-input') ? document.getElementById('start-date-input').value : "", // 期間開始
+                endDate: document.getElementById('end-date-input') ? document.getElementById('end-date-input').value : "",     // 期間終了
+                genbaName: genbaValue,
+                businessType: document.querySelector('input[name="business-type"]:checked') ? document.querySelector('input[name="business-type"]:checked').value : "",
+                ownerName: document.getElementById('owner-input') ? document.getElementById('owner-input').value.trim() : "",
+                summaryData: [],
                 totalVolume: parseFloat(document.getElementById('total-volume-display').innerText.replace(/,/g, '')) || 0,
                 totalAmount: parseInt(document.getElementById('total-amount-input').value.replace(/,/g, ''), 10) || 0
             };
-            const original = btn.innerHTML; btn.disabled = true; btn.innerHTML = "保存中...";
-            google.script.run.withSuccessHandler(() => {
-                btn.innerHTML = "✓ 保存完了";
-                if (dataToSave.ownerName) ownerMasterList.push({genba: dataToSave.genbaName, owner: dataToSave.ownerName});
-                setTimeout(() => { btn.disabled = false; btn.innerHTML = original; }, 3000);
-            }).withFailureHandler(err => {
-                btn.disabled = false; btn.innerHTML = original;
-                const msg = String(err.message || err);
-                alert(msg.includes("DuplicateData") ? "エラー：二重登録はできません。" : "保存失敗: " + msg);
-            }).saveToSpreadsheet(JSON.stringify(dataToSave));
+
+            const rows = document.querySelectorAll('.data-row');
+            rows.forEach(row => {
+                const volInput = row.querySelector('.vol-input').value.replace(/,/g, '');
+                const priceInput = row.querySelector('.price-input').value.replace(/,/g, '');
+                
+                const vol = parseFloat(volInput) || 0;
+                const price = parseInt(priceInput, 10) || 0;
+                dataToSave.summaryData.push({
+                    species: row.dataset.species,
+                    volume: vol,
+                    avgPrice: price,
+                    subtotal: Math.round(vol * price)
+                });
+            });
+
+            const stringifiedData = JSON.stringify(dataToSave);
+            const originalHtml = btn.innerHTML;
+            
+            btn.disabled = true;
+            btn.innerHTML = `<span class="animate-pulse">保存処理中...</span>`;
+            
+            google.script.run
+                .withSuccessHandler(res => {
+                    btn.innerHTML = "✓ 保存完了";
+                    btn.className = "w-full bg-[#059669] text-white py-4 rounded-xl font-bold shadow-md flex items-center justify-center gap-3";
+                    
+                    // フロント側のマスタメモリを更新して、リロードなしで次回入力に反映させる
+                    if (dataToSave.genbaName && dataToSave.ownerName) {
+                        const exists = ownerMasterList.some(m => m.genba === dataToSave.genbaName && m.owner === dataToSave.ownerName);
+                        if (!exists) {
+                            ownerMasterList.push({genba: dataToSave.genbaName, owner: dataToSave.ownerName});
+                            updateOwnerSuggestions(); 
+                        }
+                    }
+
+                    setTimeout(() => {
+                        btn.disabled = false;
+                        btn.innerHTML = originalHtml;
+                        btn.className = "w-full bg-white border-2 border-[#059669] text-[#059669] py-4 rounded-xl font-bold hover:bg-[#059669] hover:text-white transition-all shadow-sm flex items-center justify-center gap-3";
+                    }, 3000);
+                })
+                .withFailureHandler(err => {
+                    btn.disabled = false;
+                    btn.innerHTML = originalHtml; // エラー時はボタンを元に戻す
+                    
+                    const errMsg = String(err.message || err);
+                    if (errMsg.includes("DuplicateData") || errMsg.includes("重複") || errMsg.includes("二重登録")) {
+                        alert("エラー：同じ現場名・所有者・日付のデータが既に登録されています。\n二重登録はできません。");
+                    } else {
+                        alert("保存に失敗しました: " + errMsg);
+                    }
+                })
+                .saveToSpreadsheet(stringifiedData);
+        }
+
+        function resetApp() {
+            currentBase64Image = null;
+            document.getElementById('pdf-input').value = '';
+            document.getElementById('preview-container').classList.add('hidden');
+            
+            const btn = document.getElementById('analyze-btn');
+            btn.disabled = true;
+            btn.className = "w-full bg-slate-200 text-slate-500 py-4 rounded-xl font-bold flex flex-col items-center justify-center gap-1 transition-all";
+            btn.innerHTML = `<span class="text-lg">データ抽出を実行</span><span id="img-size-info" class="text-[9px] font-normal opacity-80 italic">PDFを選択してください</span>`;
+            
+            document.getElementById('result-content').innerHTML = `
+                <div class="flex flex-col items-center justify-center py-32 text-slate-300">
+                    <svg class="w-16 h-16 mb-4 opacity-10" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 00 2 2h10a2 2 0 00 2-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01m-.01 4h.01"></path></svg>
+                    <p class="text-sm italic text-center">解析結果がここに表示されます</p>
+                </div>
+            `;
         }
 
         function showError(err) {
             document.getElementById('loading').classList.add('hidden');
-            const fmt = String(err).replace(/\n/g, '<br>');
+            
+            const formattedErr = String(err.message || err).replace(/\n/g, '<br>');
+            
             document.getElementById('result-content').innerHTML = `
-                <div class="bg-red-50 text-red-600 p-8 rounded-2xl border border-red-100 text-center">
-                    <p class="font-bold text-sm">抽出エラーが発生しました</p>
-                    <div class="mt-4 text-red-800 leading-relaxed text-xs text-left bg-red-100 p-3 rounded">${fmt}</div>
-                    <button onclick="location.reload()" class="mt-4 px-6 py-2 bg-white border rounded-lg text-xs font-bold transition-colors">初期画面に戻る</button>
-                </div>`;
+                <div class="bg-red-50 text-red-600 p-8 rounded-2xl border border-red-100 flex flex-col items-center text-center gap-4">
+                    <div class="bg-red-100 p-4 rounded-full">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <div class="w-full">
+                        <p class="font-bold text-sm text-red-800">抽出エラーが発生しました</p>
+                        <!-- 改行を反映させたメッセージを出力 -->
+                        <div class="mt-4 text-red-800 leading-relaxed text-xs text-left bg-red-100 p-3 rounded">${formattedErr}</div>
+                    </div>
+                    <button onclick="resetApp()" class="mt-4 px-6 py-2 bg-white border border-red-200 rounded-lg text-xs font-bold hover:bg-red-50 shadow-sm transition-colors">初期画面に戻る</button>
+                </div>
+            `;
         }
     </script>
 </body>

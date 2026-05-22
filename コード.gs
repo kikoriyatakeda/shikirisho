@@ -20,6 +20,10 @@ function testDrivePermission() {
   }
 }
 
+// ========== 修正ポイント: スプレッドシートIDを定数化 ==========
+const MASTER_SS_ID = '1-HV-cb7tPiOvTD4nzKnlhfmPnfr59Kq2qxNNsSlblWU';      // マスタ用（所有者マスタの移動先）
+const INVOICE_SS_ID = '1hlzou-dX-hBmUwryu1YJgme4_IOiP4V8CswMQc3YXac';   // 仕切り書用（既存）
+
 /**
  * 初期化データ（現場リストと所有者マスタ）をまとめて取得する
  */
@@ -35,8 +39,7 @@ function getInitialData() {
  */
 function getGenbaList() {
   try {
-    const spreadsheetId = '1-HV-cb7tPiOvTD4nzKnlhfmPnfr59Kq2qxNNsSlblWU';
-    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const ss = SpreadsheetApp.openById(MASTER_SS_ID);
     const sheet = ss.getSheetByName("現場マスタ");
     if (!sheet) return [];
     
@@ -66,8 +69,7 @@ function getGenbaList() {
  */
 function getOwnerMasterList() {
   try {
-    const spreadsheetId = '1hlzou-dX-hBmUwryu1YJgme4_IOiP4V8CswMQc3YXac';
-    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const ss = SpreadsheetApp.openById(MASTER_SS_ID);
     let sheet = ss.getSheetByName("所有者マスタ");
     if (!sheet) return [];
     
@@ -85,26 +87,43 @@ function getOwnerMasterList() {
 
 /**
  * Google Drive の OCR機能 を使用して画像を解析する
+ * （自動リトライ機能追加版）
  */
 function analyzeDocumentImage(base64Image, dummyPrompt) {
   try {
     const blob = Utilities.newBlob(Utilities.base64Decode(base64Image), MimeType.JPEG, "temp_ocr.jpg");
     
     let fileId;
-    try {
-      const resource = { title: "temp_ocr_doc" };
-      const file = Drive.Files.insert(resource, blob, {ocr: true, ocrLanguage: 'ja'});
-      fileId = file.id;
-    } catch (apiError) {
-      const errorStr = apiError.toString();
-      if (errorStr.includes("User rate limit exceeded for OCR")) {
-        return JSON.stringify({ 
-          error: "【OCR利用制限エラー】\n短時間に連続して解析を行ったため、一時的な利用制限がかかっています。\n恐れ入りますが、数分〜数十分ほど時間を置いてから再度お試しください。"
-        });
+    let retryCount = 0;
+    const maxRetries = 3; // 最大3回再試行する
+    let success = false;
+
+    // OCR処理の実行とエラー時のリトライループ
+    while (!success && retryCount <= maxRetries) {
+      try {
+        const resource = { title: "temp_ocr_doc" };
+        const file = Drive.Files.insert(resource, blob, {ocr: true, ocrLanguage: 'ja'});
+        fileId = file.id;
+        success = true; // 成功したらループを抜ける
+      } catch (apiError) {
+        const errorStr = apiError.toString();
+        // 利用制限エラーの場合のみリトライする
+        if (errorStr.includes("User rate limit exceeded for OCR") || errorStr.includes("Rate Limit Exceeded")) {
+          retryCount++;
+          if (retryCount > maxRetries) {
+            return JSON.stringify({ 
+              error: "【OCR利用制限エラー】\n裏側で複数回自動再試行を行いましたが、制限が解除されませんでした。\n恐れ入りますが、数分〜数十分ほど時間を置いてから再度お試しください。"
+            });
+          }
+          // 待機する（1回目:3秒, 2回目:6秒, 3回目:9秒）
+          Utilities.sleep(retryCount * 3000);
+        } else {
+          // 別のエラーの場合は即座にエラーを返す
+          return JSON.stringify({ 
+            error: "【Drive API エラー】\n" + errorStr + "\n\n(GASエディタで triggerAuthorization を実行して権限を許可してください)"
+          });
+        }
       }
-      return JSON.stringify({ 
-        error: "【Drive API エラー】\n" + errorStr + "\n\n(GASエディタで triggerAuthorization を実行して権限を許可してください)"
-      });
     }
 
     const doc = DocumentApp.openById(fileId);
@@ -120,7 +139,7 @@ function analyzeDocumentImage(base64Image, dummyPrompt) {
 }
 
 /**
- * OCRテキストの解析ロジック（期間抽出対応版）
+ * OCRテキストの解析ロジック
  */
 function parseOcrText(text) {
   const lines = text.split('\n');
@@ -145,18 +164,37 @@ function parseOcrText(text) {
     dateStr = `${year}/${month.toString().padStart(2, '0')}/${day.toString().padStart(2, '0')}`;
   }
 
-  // 2. 期間の抽出（案B: 年を補完する）
-  // パターン: 4/9 ～ 4/22, 04 / 09 - 04 / 22 など
-  const periodMatch = text.match(/([0-9０-９]{1,2})\s*[\/／]\s*([0-9０-９]{1,2})\s*[～~－-]\s*([0-9０-９]{1,2})\s*[\/／]\s*([0-9０-９]{1,2})/);
-  if (periodMatch && extractedYear > 0) {
-    const m1 = periodMatch[1].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    const d1 = periodMatch[2].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    const m2 = periodMatch[3].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    const d2 = periodMatch[4].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
-    periodStr = `${extractedYear}/${m1}/${d1} ～ ${extractedYear}/${m2}/${d2}`;
-  } else if (periodMatch) {
-    // 年が不明な場合はそのまま抽出
-    periodStr = periodMatch[0].replace(/\s+/g, '');
+  // 2. 期間の抽出（パターンを大幅に拡張・強化）
+  // 4/9 ～ 4/22, 2026/04/09 - 2026/04/22, R6.4.9 ~ R6.4.22, 1月1日～1月31日 などに対応
+  const periodMatch = text.match(/(?:([0-9０-９]{1,4})\s*[\/\.年／]\s*)?([0-9０-９]{1,2})\s*[\/\.月／]\s*([0-9０-９]{1,2})\s*日?\s*[～~－-]\s*(?:([0-9０-９]{1,4})\s*[\/\.年／]\s*)?([0-9０-９]{1,2})\s*[\/\.月／]\s*([0-9０-９]{1,2})\s*日?/);
+  
+  if (periodMatch) {
+    // 全角数字を半角に変換
+    let y1Str = periodMatch[1] ? periodMatch[1].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)) : null;
+    let m1Str = periodMatch[2].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    let d1Str = periodMatch[3].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    
+    let y2Str = periodMatch[4] ? periodMatch[4].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0)) : null;
+    let m2Str = periodMatch[5].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+    let d2Str = periodMatch[6].replace(/[０-９]/g, s => String.fromCharCode(s.charCodeAt(0) - 0xFEE0));
+
+    let y1 = y1Str ? parseInt(y1Str) : extractedYear;
+    let m1 = parseInt(m1Str);
+    let d1 = parseInt(d1Str);
+    
+    let y2 = y2Str ? parseInt(y2Str) : (y1 || extractedYear);
+    let m2 = parseInt(m2Str);
+    let d2 = parseInt(d2Str);
+
+    // 2桁年の補正（例: 26 -> 2026）
+    if (y1 > 0 && y1 < 100) y1 += 2000;
+    if (y2 > 0 && y2 < 100) y2 += 2000;
+
+    let start = y1 > 0 ? `${y1}/${m1.toString().padStart(2, '0')}/${d1.toString().padStart(2, '0')}` : `${m1}/${d1}`;
+    let end = y2 > 0 ? `${y2}/${m2.toString().padStart(2, '0')}/${d2.toString().padStart(2, '0')}` : `${m2}/${d2}`;
+    
+    // 必ず「～」で繋いだフォーマットにして返す
+    periodStr = `${start} ～ ${end}`;
   }
 
   // 3. 所有者候補の抽出（補助的に3文字以上の文字列を出す）
@@ -226,7 +264,7 @@ function parseOcrText(text) {
 
   return JSON.stringify({
     date: dateStr,
-    period: periodStr, // 新規追加
+    period: periodStr, 
     ownerCandidates: ownerCandidates, 
     summaryData: summaryData,
     volumeCandidates: Array.from(globalVolumeCandidates).sort((a,b)=>a-b),
@@ -243,36 +281,49 @@ function saveToSpreadsheet(jsonString) {
     if (!jsonString) throw new Error("データが空です。");
     const data = JSON.parse(jsonString);
     
-    const spreadsheetId = '1hlzou-dX-hBmUwryu1YJgme4_IOiP4V8CswMQc3YXac';
-    const ss = SpreadsheetApp.openById(spreadsheetId);
+    const invoiceSs = SpreadsheetApp.openById(INVOICE_SS_ID);
     
-    // 1. 仕切り書への保存（12列構成）
-    let sheet = ss.getSheetByName("仕切り書");
+    // 期間（period）を開始日と終了日に分割する処理
+    let startDate = "-";
+    let endDate = "-";
+    if (data.period && data.period !== "-") {
+      const parts = data.period.split(/～|~|－|-/);
+      if (parts.length >= 2) {
+        startDate = parts[0].trim();
+        endDate = parts.slice(1).join('-').trim(); // 複数ハイフン対策
+      } else {
+        startDate = data.period.trim();
+      }
+    }
+
+    // 1. 仕切り書への保存（13列構成）
+    let sheet = invoiceSs.getSheetByName("仕切り書");
     if (!sheet) {
-      sheet = ss.insertSheet("仕切り書");
-      // 期間列を挿入した新ヘッダー
-      sheet.appendRow(["保存日時", "現場名", "事業区分", "所有者", "期間", "日付", "樹種", "材積", "単価", "小計", "合計材積", "合計金額"]);
-      sheet.getRange(1, 1, 1, 12).setBackground("#059669").setFontColor("white").setFontWeight("bold");
+      sheet = invoiceSs.insertSheet("仕切り書");
+      sheet.appendRow(["保存日時", "現場名", "事業区分", "所有者", "日付", "開始日", "終了日", "樹種", "材積", "単価", "小計", "合計材積", "合計金額"]);
+      sheet.getRange(1, 1, 1, 13).setBackground("#059669").setFontColor("white").setFontWeight("bold");
     } else {
-      // 重複チェック（列位置がずれたので修正：現場[1], 所有者[3], 日付[5]）
       const existingData = sheet.getDataRange().getDisplayValues();
       for (let i = 1; i < existingData.length; i++) {
+        // 重複チェック
         if (existingData[i][1] === data.genbaName && 
             existingData[i][3] === data.ownerName && 
-            existingData[i][5] === data.date) {
+            existingData[i][4] === data.date) {
            throw new Error("DuplicateData: 同じデータが既に登録されています。");
         }
       }
     }
     
     const now = new Date();
+    // スプレッドシートの13列にピタリと合うように配列を組む
     const rows = (data.summaryData || []).map(item => [
       now, 
       data.genbaName || "-", 
       data.businessType || "-", 
       data.ownerName || "-", 
-      data.period || "-", // 期間
-      data.date || "-",   // 日付
+      data.date || "-",     // 日付
+      startDate,            // 開始日
+      endDate,              // 終了日
       item.species || "", 
       item.volume || 0, 
       item.avgPrice || 0, 
@@ -284,7 +335,8 @@ function saveToSpreadsheet(jsonString) {
 
     // 2. 所有者マスタの自動更新
     if (data.genbaName && data.ownerName) {
-      updateOwnerMaster(ss, data.genbaName, data.ownerName);
+      const masterSs = SpreadsheetApp.openById(MASTER_SS_ID);
+      updateOwnerMaster(masterSs, data.genbaName, data.ownerName);
     }
 
     return "Success";
