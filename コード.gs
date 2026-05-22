@@ -190,17 +190,6 @@ function parseOcrText(text) {
     if (y1 > 0 && y1 < 100) y1 += 2000;
     if (y2 > 0 && y2 < 100) y2 += 2000;
 
-    // ▼ 年またぎ自動補正ロジックの追加
-    // 年の指定がなく、基準年の設定が有効な場合のみ補正を適用
-    if (!y1Str && !y2Str && extractedYear > 0) {
-      if (m1 > m2) {
-        // 例: 開始月が12月、終了月が1月などの場合
-        // 開始日(y1)は基準年前年、終了日(y2)は基準年となるようセット
-        y1 = extractedYear - 1;
-        y2 = extractedYear;
-      }
-    }
-
     let start = y1 > 0 ? `${y1}/${m1.toString().padStart(2, '0')}/${d1.toString().padStart(2, '0')}` : `${m1}/${d1}`;
     let end = y2 > 0 ? `${y2}/${m2.toString().padStart(2, '0')}/${d2.toString().padStart(2, '0')}` : `${m2}/${d2}`;
     
@@ -220,7 +209,22 @@ function parseOcrText(text) {
     if (name.length >= 3 && !ownerCandidates.includes(name)) ownerCandidates.push(name);
   }
 
-  // ★ ドロップダウン候補用の全数字収集
+  // 4. 樹種と数値のパズル
+  const speciesWords = ["スギ", "ヒノキ", "マツ", "杉", "桧", "その他"];
+  let foundSpecies = [];
+  let firstSpeciesIndex = -1;
+  for (let i = 0; i < lines.length; i++) {
+    for (let sp of speciesWords) {
+      if (lines[i].includes(sp)) {
+        let norm = (sp === "杉") ? "スギ" : (sp === "桧") ? "ヒノキ" : sp;
+        if (!foundSpecies.includes(norm)) {
+          foundSpecies.push(norm);
+          if (firstSpeciesIndex === -1) firstSpeciesIndex = i; 
+        }
+      }
+    }
+  }
+
   let globalVolumeCandidates = new Set([0]);
   let globalPriceCandidates = new Set([0]);
   for (let line of lines) {
@@ -234,90 +238,29 @@ function parseOcrText(text) {
     }
   }
 
-  // 4. 新・樹種マッピング & 厳格グループ抽出
-  const speciesWords = ["スギ", "ヒノキ", "マツ", "杉", "桧", "その他"];
-  const endWords = ["売上", "合計", "精算", "消費税", "総計", "差引"];
-
-  // ★ 抽出結果を格納するマップ（初期状態で「スギ」「ヒノキ」「その他」の3行を必ず確保）
-  let speciesResult = {
-    "スギ": { volume: 0, avgPrice: 0 },
-    "ヒノキ": { volume: 0, avgPrice: 0 },
-    "その他": { volume: 0, avgPrice: 0 }
-  };
-
-  // 誤反応を避けるため、まず「最初に樹種（スギやヒノキ等）が出現する行」を探す
-  let firstSpeciesIdx = -1;
-  for (let i = 0; i < lines.length; i++) {
-    for (let sp of speciesWords) {
-      if (lines[i].includes(sp)) {
-        firstSpeciesIdx = i;
-        break;
+  if (foundSpecies.length > 0) {
+    let allNumbers = [];
+    for (let i = firstSpeciesIndex; i < lines.length; i++) {
+      if (lines[i].match(/(売上|合計|精算|消費税)/)) break;
+      let nums = lines[i].replace(/,/g, '').match(/\d+(\.\d+)?|[-ー－—_]{2,}/g);
+      if (nums) {
+        nums.forEach(n => {
+          if (n.match(/[-ー－—_]/)) allNumbers.push(0);
+          else allNumbers.push(parseFloat(n));
+        });
       }
     }
-    if (firstSpeciesIdx !== -1) break;
+    let half = Math.ceil(allNumbers.length / 2);
+    let volumes = allNumbers.slice(0, half);
+    let prices = allNumbers.slice(half);
+    foundSpecies.forEach((sp, idx) => {
+      summaryData.push({
+        species: sp,
+        volume: volumes[idx] || 0,
+        avgPrice: Math.round(prices[idx] || 0)
+      });
+    });
   }
-
-  if (firstSpeciesIdx !== -1) {
-    let currentTargetSp = null;
-    let targetGroupNums = [];
-
-    for (let i = firstSpeciesIdx; i < lines.length; i++) {
-      let line = lines[i];
-
-      // 集計の終わりキーワードを見つけたら、そこでデータ取得をクローズ
-      if (endWords.some(w => line.includes(w))) {
-        if (currentTargetSp && targetGroupNums.length > 0) {
-          processGroupNumbers(currentTargetSp, targetGroupNums, speciesResult);
-        }
-        currentTargetSp = null;
-        targetGroupNums = [];
-        break;
-      }
-
-      // 樹種キーワードが含まれているかチェック
-      let foundSp = null;
-      for (let sp of speciesWords) {
-        if (line.includes(sp)) {
-          foundSp = (sp === "杉") ? "スギ" : (sp === "桧") ? "ヒノキ" : sp;
-          break;
-        }
-      }
-
-      // 新しい樹種が見つかった場合、前の樹種データを集計・確定する
-      if (foundSp) {
-        if (currentTargetSp && targetGroupNums.length > 0) {
-          processGroupNumbers(currentTargetSp, targetGroupNums, speciesResult);
-        }
-        currentTargetSp = foundSp;
-        targetGroupNums = [];
-      }
-
-      // 現在ターゲット中の樹種があれば、同じ行の数値をすべて集める
-      if (currentTargetSp) {
-        let nums = line.replace(/,/g, '').match(/\d+(\.\d+)?|[-ー－—_]{2,}/g);
-        if (nums) {
-          nums.forEach(n => {
-            if (n.match(/[-ー－—_]/)) targetGroupNums.push(0);
-            else targetGroupNums.push(parseFloat(n));
-          });
-        }
-      }
-    }
-
-    // ループ終了後の残処理
-    if (currentTargetSp && targetGroupNums.length > 0) {
-      processGroupNumbers(currentTargetSp, targetGroupNums, speciesResult);
-    }
-  }
-
-  // 最終的に、確保されたデフォルト3樹種の枠をそのまま `summaryData` にマッピング
-  summaryData = Object.keys(speciesResult).map(spName => {
-    return {
-      species: spName,
-      volume: speciesResult[spName].volume,
-      avgPrice: speciesResult[spName].avgPrice
-    };
-  });
 
   return JSON.stringify({
     date: dateStr,
@@ -328,66 +271,6 @@ function parseOcrText(text) {
     priceCandidates: Array.from(globalPriceCandidates).sort((a,b)=>a-b),
     rawOcrText: text
   });
-}
-
-/**
- * 樹種グループから高精度に数値ペア（材積、単価）を解くサブ関数
- */
-function processGroupNumbers(speciesName, nums, speciesResult) {
-  let volumes = [];
-  let prices = [];
-
-  // 数値の特徴で仕分け
-  nums.forEach(n => {
-    if (n === 0) {
-      volumes.push(0);
-      prices.push(0);
-    } else if (!Number.isInteger(n) || n < 100) {
-      // 材積候補（小数、または100未満の極めて小さい整数）
-      volumes.push(n);
-    } else if (Number.isInteger(n) && n >= 100) {
-      // 単価・金額候補（100以上の大きな整数）
-      prices.push(n);
-    }
-  });
-
-  let assignedV = 0;
-  let assignedP = 0;
-  let success = false;
-
-  // 同一の樹種グループ内で検算（材積 × 単価 ＝ 小計）パズル
-  for (let i = 0; i < volumes.length; i++) {
-    let v = volumes[i];
-    if (v === 0) continue;
-
-    for (let j = 0; j < prices.length; j++) {
-      let p = prices[j];
-      let expectedSub = Math.round(v * p);
-
-      // 小計が価格リストの別インデックスにあるか探す（誤差5円以内）
-      let sIndex = prices.findIndex((val, idx) => idx !== j && Math.abs(val - expectedSub) <= 5);
-
-      if (sIndex !== -1) {
-        assignedV = v;
-        assignedP = p;
-        success = true;
-        break;
-      }
-    }
-    if (success) break;
-  }
-
-  // 完全にパズルが解けなかった場合のフォールバック（最も手前にある数字をセット）
-  if (!success) {
-    assignedV = volumes[0] || 0;
-    assignedP = prices[0] || 0;
-  }
-
-  // マップにデータを格納・上書き
-  speciesResult[speciesName] = {
-    volume: assignedV,
-    avgPrice: Math.round(assignedP)
-  };
 }
 
 /**
@@ -422,8 +305,9 @@ function saveToSpreadsheet(jsonString) {
     } else {
       const existingData = sheet.getDataRange().getDisplayValues();
       for (let i = 1; i < existingData.length; i++) {
-        // 重複チェック
+        // 重複チェック: 現場名[1], 事業区分[2], 所有者[3], 日付[4] が全て一致するか確認
         if (existingData[i][1] === data.genbaName && 
+            existingData[i][2] === data.businessType && // 事業区分を追加
             existingData[i][3] === data.ownerName && 
             existingData[i][4] === data.date) {
            throw new Error("DuplicateData: 同じデータが既に登録されています。");
